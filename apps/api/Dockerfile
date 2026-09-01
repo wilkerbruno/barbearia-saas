@@ -7,8 +7,17 @@
 # Ao subir o container pela primeira vez, ele cria todas as tabelas sozinho
 # (via `prisma db push`, ver CMD no final) — não precisa de acesso SSH nem
 # console pra rodar migração manualmente.
-
-FROM node:22-alpine
+#
+# Base Debian (slim), não Alpine: os binários do Prisma têm suporte melhor a
+# glibc + OpenSSL. Em Alpine (musl), o "schema engine" do Prisma às vezes
+# nem consegue rodar (falha ao detectar a versão do OpenSSL e quebra com um
+# erro que nem chega a ser um JSON válido) — foi exatamente isso que
+# aconteceu ao rodar `prisma db push` em produção. Instalar openssl aqui
+# evita esse problema.
+FROM node:22-slim
+RUN apt-get update -y \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 RUN corepack enable
 WORKDIR /repo
 
