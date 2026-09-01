@@ -46,6 +46,17 @@ RUN pnpm --filter @barbearia-saas/api exec tsc -p ../../packages/shared/tsconfig
 
 RUN pnpm --filter @barbearia-saas/api build
 
+# Verificação: se isso falhar, o problema é no BUILD (o `nest build` gerou o
+# arquivo em outro lugar). Se isso passar mas o container mesmo assim disser
+# "Cannot find module" ao rodar, o arquivo existe na imagem e algo no
+# EasyPanel (ex.: um volume/mount configurado por cima de /repo ou
+# /repo/apps/api) está escondendo/substituindo essa pasta em tempo de
+# execução — nesse caso, veja em "Mounts"/"Volumes" do serviço da API no
+# EasyPanel se há algum volume apontando pra dentro dessas pastas e remova.
+RUN echo "--- conteúdo de apps/api/dist depois do build ---" \
+  && find /repo/apps/api/dist -maxdepth 2 \
+  && test -f /repo/apps/api/dist/main.js
+
 WORKDIR /repo/apps/api
 ENV NODE_ENV=production
 EXPOSE 3000
@@ -64,4 +75,8 @@ EXPOSE 3000
 # serviço, garante o primeiro usuário SAAS_ADMIN — tudo isso sem precisar de
 # SSH nem console, porque roda dentro do próprio container a cada boot (é
 # idempotente, então rodar de novo em todo redeploy não causa problema).
-CMD ["sh", "-c", "npx prisma db push --skip-generate && npx ts-node prisma/seed.ts && node dist/main.js"]
+# O `echo`/`ls` antes do `node` é só diagnóstico (some do log assim que isso
+# funcionar): mostra o que o container realmente enxerga em ./dist no exato
+# momento de subir, pra confirmar se é o build ou um mount/volume do
+# EasyPanel escondendo a pasta em tempo de execução.
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npx ts-node prisma/seed.ts && echo '--- conteúdo de dist/ ao subir ---' && ls -la dist/ && node dist/main.js"]
