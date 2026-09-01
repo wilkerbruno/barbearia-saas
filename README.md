@@ -48,6 +48,18 @@ SaaS) usa o painel web separado, por ser um back-office de uso ocasional.
 
 ## Como rodar
 
+### 0. Pacote compartilhado (uma vez, e de novo sempre que editar `packages/shared`)
+
+```bash
+pnpm install
+pnpm build:shared
+```
+
+`packages/shared` (tipos usados pela API, mobile e painel web) precisa estar
+compilado (`packages/shared/dist`) antes de rodar qualquer um dos três apps —
+sem isso, a API não builda e o mobile/admin-web não encontram o pacote. Rode
+de novo toda vez que mudar algo em `packages/shared/src`.
+
 ### 1. Banco de dados
 
 ```bash

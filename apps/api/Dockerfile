@@ -32,6 +32,18 @@ COPY . .
 RUN pnpm install --frozen-lockfile --filter "@barbearia-saas/api..."
 
 RUN pnpm --filter @barbearia-saas/api prisma:generate
+
+# packages/shared é usado como TypeScript "cru" (sem build próprio) durante o
+# desenvolvimento do mobile/admin-web, porque o bundler deles (Metro/Next)
+# compila os .ts direto. Mas o `nest build` da API usa o `tsc` de verdade, e
+# se ele enxergar um arquivo .ts de fora de apps/api/src (o do shared) no
+# meio da compilação, ele muda onde tudo é gerado e o `dist/main.js` some do
+# lugar esperado. Por isso compilamos o shared separadamente aqui pra virar
+# um .js + .d.ts de verdade antes de compilar a API (usamos o `tsc` que já
+# está instalado dentro de apps/api pra isso, sem precisar adicionar outra
+# dependência).
+RUN pnpm --filter @barbearia-saas/api exec tsc -p ../../packages/shared/tsconfig.json
+
 RUN pnpm --filter @barbearia-saas/api build
 
 WORKDIR /repo/apps/api
