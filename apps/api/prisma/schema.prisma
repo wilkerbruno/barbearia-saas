@@ -1,0 +1,213 @@
+// Schema do banco de dados. Rode `pnpm --filter @barbearia-saas/api prisma:migrate`
+// depois de configurar DATABASE_URL (veja .env.example) para criar as tabelas.
+//
+// Banco: MySQL (ex: o serviço de MySQL do EasyPanel). Ver docs/DEPLOY_EASYPANEL.md
+// para como conectar com segurança (rede interna, usuário com privilégio mínimo).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Papel {
+  CLIENTE
+  FUNCIONARIO
+  BARBEARIA_ADMIN
+  SAAS_ADMIN
+}
+
+enum StatusAgendamento {
+  PENDENTE
+  CONFIRMADO
+  CONCLUIDO
+  CANCELADO
+}
+
+enum StatusAssinatura {
+  TRIAL
+  ATIVA
+  INADIMPLENTE
+  CANCELADA
+}
+
+enum StatusFatura {
+  PAGA
+  PENDENTE
+  ATRASADA
+}
+
+// ============================= TENANT =============================
+
+model Barbearia {
+  id        String   @id @default(uuid())
+  nome      String
+  slug      String   @unique
+  endereco  String?
+  telefone  String?
+  criadoEm  DateTime @default(now())
+
+  usuarios     Usuario[]
+  funcionarios Funcionario[]
+  servicos     Servico[]
+  pacotes      Pacote[]
+  agendamentos Agendamento[]
+  assinatura   Assinatura?
+}
+
+// ============================= USUÁRIOS =============================
+
+model Usuario {
+  id           String    @id @default(uuid())
+  nome         String
+  email        String    @unique
+  senhaHash    String
+  telefone     String?
+  papel        Papel
+  barbeariaId  String?
+  barbearia    Barbearia? @relation(fields: [barbeariaId], references: [id])
+  criadoEm     DateTime  @default(now())
+
+  // Preenchido apenas quando papel = FUNCIONARIO
+  funcionario  Funcionario?
+
+  // Agendamentos feitos por este usuário quando papel = CLIENTE
+  agendamentosComoCliente Agendamento[] @relation("AgendamentosCliente")
+
+  @@index([barbeariaId])
+}
+
+// Dados específicos de quem trabalha na barbearia (papel = FUNCIONARIO).
+// Fica separado de Usuario para guardar comissão, horário de trabalho etc.
+model Funcionario {
+  id                  String   @id @default(uuid())
+  usuarioId           String   @unique
+  usuario             Usuario  @relation(fields: [usuarioId], references: [id])
+  barbeariaId         String
+  barbearia           Barbearia @relation(fields: [barbeariaId], references: [id])
+  cargo               String   @default("Barbeiro")
+  comissaoPercentual  Int      @default(60) // % do valor do serviço que fica com o funcionário
+  disponivel          Boolean  @default(true)
+  ativo               Boolean  @default(true)
+
+  agendamentos Agendamento[] @relation("AgendamentosFuncionario")
+
+  @@index([barbeariaId])
+}
+
+// ============================= CATÁLOGO: SERVIÇOS E PACOTES =============================
+
+model Servico {
+  id              String   @id @default(uuid())
+  barbeariaId     String
+  barbearia       Barbearia @relation(fields: [barbeariaId], references: [id])
+  nome            String
+  descricao       String?  @db.Text
+  duracaoMinutos  Int      @default(30)
+  precoCentavos   Int
+  ativo           Boolean  @default(true)
+
+  agendamentos      Agendamento[]
+  pacotesQueIncluem PacoteServico[]
+
+  @@index([barbeariaId])
+}
+
+model Pacote {
+  id             String   @id @default(uuid())
+  barbeariaId    String
+  barbearia      Barbearia @relation(fields: [barbeariaId], references: [id])
+  nome           String
+  descricao      String?  @db.Text
+  precoCentavos  Int
+  ativo          Boolean  @default(true)
+
+  servicos     PacoteServico[]
+  agendamentos Agendamento[]
+
+  @@index([barbeariaId])
+}
+
+// Relação N:N entre Pacote e Servico (um pacote agrupa vários serviços).
+model PacoteServico {
+  pacoteId  String
+  pacote    Pacote  @relation(fields: [pacoteId], references: [id], onDelete: Cascade)
+  servicoId String
+  servico   Servico @relation(fields: [servicoId], references: [id])
+
+  @@id([pacoteId, servicoId])
+}
+
+// ============================= AGENDAMENTOS =============================
+
+model Agendamento {
+  id            String            @id @default(uuid())
+  barbeariaId   String
+  barbearia     Barbearia         @relation(fields: [barbeariaId], references: [id])
+  clienteId     String
+  cliente       Usuario           @relation("AgendamentosCliente", fields: [clienteId], references: [id])
+  funcionarioId String
+  funcionario   Funcionario       @relation("AgendamentosFuncionario", fields: [funcionarioId], references: [id])
+  servicoId     String?
+  servico       Servico?          @relation(fields: [servicoId], references: [id])
+  pacoteId      String?
+  pacote        Pacote?           @relation(fields: [pacoteId], references: [id])
+  inicio        DateTime
+  fim           DateTime
+  precoCentavos Int
+  status        StatusAgendamento @default(CONFIRMADO)
+  criadoEm      DateTime          @default(now())
+
+  @@index([barbeariaId, inicio])
+  @@index([funcionarioId, inicio])
+  @@index([clienteId])
+}
+
+// ============================= PLANOS E ASSINATURA (SAAS) =============================
+
+model Plano {
+  id                  String   @id @default(uuid())
+  nome                String
+  precoCentavos       Int
+  limiteFuncionarios  Int?     // null = ilimitado
+  // Lista de recursos exibidos no plano. MySQL não tem tipo de lista nativo
+  // (diferente do Postgres), então guardamos como JSON: sempre um array de
+  // strings, ex: ["Até 2 funcionários", "Agenda e financeiro"].
+  recursos            Json
+  ativo               Boolean  @default(true)
+
+  assinaturas Assinatura[]
+}
+
+model Assinatura {
+  id                 String           @id @default(uuid())
+  barbeariaId        String           @unique
+  barbearia          Barbearia        @relation(fields: [barbeariaId], references: [id])
+  planoId            String
+  plano              Plano            @relation(fields: [planoId], references: [id])
+  status             StatusAssinatura @default(TRIAL)
+  inicioEm           DateTime         @default(now())
+  proximaCobrancaEm  DateTime?
+  // id da assinatura no gateway de pagamento (Stripe/Asaas/Iugu/etc.) — preencher na integração
+  gatewayAssinaturaId String?
+
+  faturas Fatura[]
+}
+
+model Fatura {
+  id               String       @id @default(uuid())
+  assinaturaId     String
+  assinatura       Assinatura   @relation(fields: [assinaturaId], references: [id])
+  valorCentavos    Int
+  vencimentoEm     DateTime
+  status           StatusFatura @default(PENDENTE)
+  metodoPagamento  String?
+  // id da cobrança no gateway de pagamento — preencher na integração
+  gatewayFaturaId  String?
+  criadoEm         DateTime     @default(now())
+
+  @@index([assinaturaId])
+}

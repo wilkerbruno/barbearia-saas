@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "Barbearia Alameda",
+    "slug": "barbearia-saas-app",
+    "scheme": "barbeariasaas",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": ["**/*"],
+    "ios": { "supportsTablet": false },
+    "android": {},
+    "web": { "bundler": "metro" }
+  }
+}

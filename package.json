@@ -1,0 +1,19 @@
+{
+  "name": "barbearia-saas",
+  "private": true,
+  "version": "0.1.0",
+  "description": "SaaS de gestão para barbearias: agenda, financeiro, catálogo de serviços/pacotes e cobrança de mensalidade das barbearias assinantes.",
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "pnpm --filter @barbearia-saas/api start:dev",
+    "dev:mobile": "pnpm --filter @barbearia-saas/mobile start",
+    "dev:admin": "pnpm --filter @barbearia-saas/admin-web dev",
+    "build": "pnpm -r build",
+    "db:up": "docker compose -f infra/docker-compose.yml up -d",
+    "db:down": "docker compose -f infra/docker-compose.yml down"
+  }
+}
