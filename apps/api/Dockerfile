@@ -16,7 +16,10 @@ WORKDIR /repo
 COPY . .
 
 # Instala só o necessário pra API + o pacote compartilhado (não puxa
-# Expo/Next do resto do monorepo).
+# Expo/Next do resto do monorepo). O .npmrc na raiz do repo reduz conexões
+# em paralelo e adiciona retries — builds em servidores com rede instável
+# (ex.: alguns hosts do EasyPanel) às vezes dão ECONNRESET/EAI_AGAIN ao
+# baixar pacotes; isso deixa o install resistente a isso.
 RUN pnpm install --frozen-lockfile --filter "@barbearia-saas/api..."
 
 RUN pnpm --filter @barbearia-saas/api prisma:generate
