@@ -4,12 +4,21 @@
 
 // ============================= PAPÉIS (RBAC) =============================
 
-export enum Papel {
-  CLIENTE = "CLIENTE",
-  FUNCIONARIO = "FUNCIONARIO",
-  BARBEARIA_ADMIN = "BARBEARIA_ADMIN", // dono/gestor da barbearia
-  SAAS_ADMIN = "SAAS_ADMIN", // administrador da plataforma (dono do SaaS)
-}
+// Não usamos `enum` (TypeScript) aqui de propósito: um `enum` é um tipo
+// "nominal" — o TypeScript não aceita a string equivalente vinda de outro
+// lugar (por exemplo, o enum que o Prisma gera a partir do schema.prisma)
+// mesmo que o valor seja idêntico ("CLIENTE" === "CLIENTE"), o que quebra a
+// build da API bem na hora do deploy. Esse padrão (objeto `as const` + tipo
+// derivado) se comporta igual a um enum no dia a dia (`Papel.CLIENTE`,
+// `Papel[]` etc.) mas é só uma união de strings por baixo, então é
+// compatível com o tipo que o Prisma gera.
+export const Papel = {
+  CLIENTE: "CLIENTE",
+  FUNCIONARIO: "FUNCIONARIO",
+  BARBEARIA_ADMIN: "BARBEARIA_ADMIN", // dono/gestor da barbearia
+  SAAS_ADMIN: "SAAS_ADMIN", // administrador da plataforma (dono do SaaS)
+} as const;
+export type Papel = (typeof Papel)[keyof typeof Papel];
 
 // ============================= USUÁRIO =============================
 
@@ -65,12 +74,14 @@ export interface FuncionarioPublico {
 
 // ============================= AGENDAMENTOS =============================
 
-export enum StatusAgendamento {
-  PENDENTE = "PENDENTE",
-  CONFIRMADO = "CONFIRMADO",
-  CONCLUIDO = "CONCLUIDO",
-  CANCELADO = "CANCELADO",
-}
+// Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
+export const StatusAgendamento = {
+  PENDENTE: "PENDENTE",
+  CONFIRMADO: "CONFIRMADO",
+  CONCLUIDO: "CONCLUIDO",
+  CANCELADO: "CANCELADO",
+} as const;
+export type StatusAgendamento = (typeof StatusAgendamento)[keyof typeof StatusAgendamento];
 
 export interface Agendamento {
   id: string;
@@ -109,12 +120,14 @@ export interface Plano {
   ativo: boolean;
 }
 
-export enum StatusAssinatura {
-  TRIAL = "TRIAL",
-  ATIVA = "ATIVA",
-  INADIMPLENTE = "INADIMPLENTE",
-  CANCELADA = "CANCELADA",
-}
+// Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
+export const StatusAssinatura = {
+  TRIAL: "TRIAL",
+  ATIVA: "ATIVA",
+  INADIMPLENTE: "INADIMPLENTE",
+  CANCELADA: "CANCELADA",
+} as const;
+export type StatusAssinatura = (typeof StatusAssinatura)[keyof typeof StatusAssinatura];
 
 export interface Assinatura {
   id: string;
@@ -125,11 +138,13 @@ export interface Assinatura {
   proximaCobrancaEm: string | null;
 }
 
-export enum StatusFatura {
-  PAGA = "PAGA",
-  PENDENTE = "PENDENTE",
-  ATRASADA = "ATRASADA",
-}
+// Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
+export const StatusFatura = {
+  PAGA: "PAGA",
+  PENDENTE: "PENDENTE",
+  ATRASADA: "ATRASADA",
+} as const;
+export type StatusFatura = (typeof StatusFatura)[keyof typeof StatusFatura];
 
 export interface Fatura {
   id: string;
