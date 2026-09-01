@@ -40,8 +40,25 @@ export interface Barbearia {
   slug: string;
   endereco?: string | null;
   telefone?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  notaMedia: number;
+  totalAvaliacoes: number;
   criadoEm: string;
 }
+
+// Retorno de GET /barbearias/proximas — Barbearia + distância calculada a
+// partir da localização atual do cliente (ver BarbeariasService.listarProximas).
+export interface BarbeariaProxima extends Barbearia {
+  distanciaKm: number;
+}
+
+// Retorno público de GET /barbearias/:id/publico (usado pela Home do cliente,
+// que não tem permissão pra ler a barbearia inteira via GET /barbearias/:id).
+export type BarbeariaPublica = Pick<
+  Barbearia,
+  "id" | "nome" | "endereco" | "telefone" | "notaMedia" | "totalAvaliacoes"
+>;
 
 // ============================= SERVIÇOS E PACOTES =============================
 
@@ -70,6 +87,17 @@ export interface FuncionarioPublico {
   id: string;
   cargo: string;
   usuario: { id: string; nome: string };
+}
+
+// ============================= AVALIAÇÕES (ESTRELAS) =============================
+
+export interface Avaliacao {
+  id: string;
+  barbeariaId: string;
+  clienteId: string;
+  nota: number; // 1 a 5
+  comentario?: string | null;
+  criadoEm: string;
 }
 
 // ============================= AGENDAMENTOS =============================

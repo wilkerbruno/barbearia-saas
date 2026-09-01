@@ -1,21 +1,22 @@
-// Tokens visuais do app — mesma paleta "moderno minimalista" usada no protótipo
-// de telas (canvas de design). Os valores em hex abaixo são a conversão
-// aproximada das cores oklch do protótipo; ajuste livremente aqui, num único
-// lugar, sem precisar mexer em cada tela.
+// Tokens visuais do app — tema escuro "barbearia clássica": couro, latão e
+// madeira escura, com um dourado/âmbar de destaque (bem mais masculino/
+// profissional que a paleta clara anterior). Como toda tela usa só os
+// nomes abaixo (colors.*, nunca hex direto), trocar a paleta aqui já muda
+// o app inteiro sem mexer em cada tela.
 export const colors = {
-  background: "#F7F5F2",
-  surface: "#FFFFFF",
-  surfaceAlt: "#F1EFEC",
-  ink: "#2A2420",
-  inkMuted: "#837A73",
-  border: "#DEDAD4",
-  accent: "#C1652E",
-  accentSoft: "#F5E4D7",
-  accentInk: "#FFFFFF",
-  success: "#4F9464",
-  successSoft: "#E4F1E7",
-  danger: "#C1442E",
-  dangerSoft: "#F6E1DC",
+  background: "#141110",
+  surface: "#1D1917",
+  surfaceAlt: "#26211D",
+  ink: "#F3EDE4",
+  inkMuted: "#9C9188",
+  border: "#39322B",
+  accent: "#CB9B4B", // dourado/latão — cor de destaque (botões, ícone ativo, estrelas)
+  accentSoft: "#3B2E1B",
+  accentInk: "#1B140B", // texto escuro sobre o dourado (contraste)
+  success: "#6FA37D",
+  successSoft: "#1D2A21",
+  danger: "#D9695A",
+  dangerSoft: "#33201C",
 };
 
 export const spacing = {

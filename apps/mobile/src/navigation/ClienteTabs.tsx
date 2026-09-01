@@ -1,26 +1,40 @@
 import React from "react";
+import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { HomeStackNavigator } from "./HomeStack";
+import { NearbyStackNavigator } from "./NearbyStack";
 import { BookingsScreen } from "../screens/cliente/BookingsScreen";
 import { ProfileScreen } from "../screens/cliente/ProfileScreen";
 import { colors } from "../theme/tokens";
+import { tabBarScreenOptions } from "./tabBarOptions";
 
 const Tab = createBottomTabNavigator();
 
 // Navegação do papel CLIENTE: Início (com o fluxo de agendamento embutido),
-// Agendamentos e Perfil — mesma estrutura do app do cliente no protótipo de telas.
+// Perto de você (descoberta por localização), Agendamentos e Perfil.
 export function ClienteTabs() {
   return (
-    <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.inkMuted,
-      }}
-    >
-      <Tab.Screen name="Início" component={HomeStackNavigator} />
-      <Tab.Screen name="Agendamentos" component={BookingsScreen} />
-      <Tab.Screen name="Perfil" component={ProfileScreen} />
+    <Tab.Navigator screenOptions={tabBarScreenOptions}>
+      <Tab.Screen
+        name="Início"
+        component={HomeStackNavigator}
+        options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "home" : "home-outline"} size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Perto de você"
+        component={NearbyStackNavigator}
+        options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "location" : "location-outline"} size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Agendamentos"
+        component={BookingsScreen}
+        options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "calendar" : "calendar-outline"} size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Perfil"
+        component={ProfileScreen}
+        options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "person" : "person-outline"} size={size} color={color} /> }}
+      />
     </Tab.Navigator>
   );
 }

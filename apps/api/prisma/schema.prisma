@@ -48,6 +48,15 @@ model Barbearia {
   slug      String   @unique
   endereco  String?
   telefone  String?
+  // Coordenadas usadas na busca "barbearias próximas" do app do cliente.
+  // Preenchidas pelo dono em "Mais > Localização" (captura o GPS do celular dele).
+  latitude  Float?
+  longitude Float?
+  // Cache da avaliação média (1 a 5) e da quantidade de avaliações, recalculado
+  // toda vez que um cliente avalia (ver AvaliacoesService/BarbeariasService).
+  // Evita ter que agregar a tabela Avaliacao a cada listagem.
+  notaMedia       Float @default(0)
+  totalAvaliacoes Int   @default(0)
   criadoEm  DateTime @default(now())
 
   usuarios     Usuario[]
@@ -56,6 +65,7 @@ model Barbearia {
   pacotes      Pacote[]
   agendamentos Agendamento[]
   assinatura   Assinatura?
+  avaliacoes   Avaliacao[]
 }
 
 // ============================= USUÁRIOS =============================
@@ -76,6 +86,9 @@ model Usuario {
 
   // Agendamentos feitos por este usuário quando papel = CLIENTE
   agendamentosComoCliente Agendamento[] @relation("AgendamentosCliente")
+
+  // Avaliações (estrelas) feitas por este usuário quando papel = CLIENTE
+  avaliacoes Avaliacao[]
 
   @@index([barbeariaId])
 }
@@ -164,6 +177,26 @@ model Agendamento {
   @@index([barbeariaId, inicio])
   @@index([funcionarioId, inicio])
   @@index([clienteId])
+}
+
+// ============================= AVALIAÇÕES (ESTRELAS) =============================
+
+// Uma avaliação (1 a 5 estrelas + comentário opcional) de um cliente sobre uma
+// barbearia. Restrita a 1 por par cliente/barbearia: avaliar de novo atualiza
+// a mesma avaliação em vez de criar outra (ver BarbeariasService.avaliar).
+model Avaliacao {
+  id          String   @id @default(uuid())
+  barbeariaId String
+  barbearia   Barbearia @relation(fields: [barbeariaId], references: [id])
+  clienteId   String
+  cliente     Usuario  @relation(fields: [clienteId], references: [id])
+  nota        Int // 1 a 5
+  comentario  String?  @db.Text
+  criadoEm    DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@unique([barbeariaId, clienteId])
+  @@index([barbeariaId])
 }
 
 // ============================= PLANOS E ASSINATURA (SAAS) =============================

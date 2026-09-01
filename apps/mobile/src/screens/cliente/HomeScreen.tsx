@@ -2,18 +2,20 @@ import React, { useEffect, useState } from "react";
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { Pacote, Servico } from "@barbearia-saas/shared";
+import { BarbeariaPublica, Pacote, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { BARBEARIA_ID } from "../../config";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { PriceTag } from "../../components/PriceTag";
+import { StarRating } from "../../components/StarRating";
 import { colors, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Home">;
 
 export function HomeScreen({ navigation }: Props) {
+  const [barbearia, setBarbearia] = useState<BarbeariaPublica | null>(null);
   const [servicos, setServicos] = useState<Servico[]>([]);
   const [pacotes, setPacotes] = useState<Pacote[]>([]);
   const [carregando, setCarregando] = useState(true);
@@ -21,10 +23,12 @@ export function HomeScreen({ navigation }: Props) {
   useEffect(() => {
     async function carregar() {
       try {
-        const [servicosRes, pacotesRes] = await Promise.all([
+        const [infoRes, servicosRes, pacotesRes] = await Promise.all([
+          api.get<BarbeariaPublica>(`/barbearias/${BARBEARIA_ID}/publico`),
           api.get<Servico[]>(`/barbearias/${BARBEARIA_ID}/servicos`),
           api.get<Pacote[]>(`/barbearias/${BARBEARIA_ID}/pacotes`),
         ]);
+        setBarbearia(infoRes.data);
         setServicos(servicosRes.data);
         setPacotes(pacotesRes.data);
       } finally {
@@ -50,9 +54,12 @@ export function HomeScreen({ navigation }: Props) {
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           <View style={{ gap: spacing.xl }}>
-            <View>
-              <Text style={styles.title}>Barbearia Alameda</Text>
-              <Text style={styles.subtitle}>Rua das Palmeiras, 92</Text>
+            <View style={{ gap: spacing.xs }}>
+              <Text style={styles.title}>{barbearia?.nome}</Text>
+              {barbearia?.endereco && <Text style={styles.subtitle}>{barbearia.endereco}</Text>}
+              {barbearia && (
+                <StarRating value={barbearia.notaMedia} totalAvaliacoes={barbearia.totalAvaliacoes} size={14} />
+              )}
             </View>
 
             <Button

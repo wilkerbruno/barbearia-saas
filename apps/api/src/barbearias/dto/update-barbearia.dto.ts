@@ -1,4 +1,4 @@
-import { IsOptional, IsString } from "class-validator";
+import { IsLatitude, IsLongitude, IsOptional, IsString } from "class-validator";
 
 export class UpdateBarbeariaDto {
   @IsOptional()
@@ -12,4 +12,14 @@ export class UpdateBarbeariaDto {
   @IsOptional()
   @IsString()
   telefone?: string;
+
+  // Preenchidos pela tela "Mais > Localização" do app (captura o GPS do
+  // celular de quem está logado como dono da barbearia).
+  @IsOptional()
+  @IsLatitude()
+  latitude?: number;
+
+  @IsOptional()
+  @IsLongitude()
+  longitude?: number;
 }
