@@ -12,12 +12,17 @@
     "ios": {
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.divisionstech.barbeariasaas",
+      "versionCode": 1
+    },
     "web": {
       "bundler": "metro"
     },
-    "plugins": [
-      "expo-secure-store"
-    ]
+    "extra": {
+      "eas": {
+        "projectId": "2e92e786-9f04-4438-9391-c4c0f59c49a5"
+      }
+    }
   }
 }
