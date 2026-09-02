@@ -4,19 +4,14 @@
 #   - Build method: Dockerfile
 #   - Build context / Root directory: a raiz do repositório (não apps/admin-web)
 #   - Dockerfile path: apps/admin-web/Dockerfile
-#
-# Diferente da API, aqui NÃO precisa compilar packages/shared num passo
-# separado antes: o next.config.js já tem `transpilePackages:
-# ["@barbearia-saas/shared"]`, que manda o próprio bundler do Next.js
-# transpilar o .ts do pacote compartilhado direto (é o motivo de esse ajuste
-# existir no next.config.js) — sem isso daria o mesmo tipo de erro de "onde
-# foi parar o arquivo compilado" que o comentário no Dockerfile da API explica.
 FROM node:22-slim
 RUN corepack enable
 WORKDIR /repo
 
 # Copia o repo inteiro (o .dockerignore na raiz evita node_modules/dist/etc
-# do seu computador vazando pra dentro da imagem).
+# do seu computador vazando pra dentro da imagem — e por isso também não dá
+# pra contar com um packages/shared/dist pré-compilado que porventura exista
+# na sua máquina: ele é ignorado igual o resto, ver passo abaixo).
 COPY . .
 
 # Instala só o necessário pro painel (não puxa NestJS/Expo do resto do
@@ -24,6 +19,18 @@ COPY . .
 # retries — builds em servidores com rede instável (ex.: alguns hosts do
 # EasyPanel) às vezes dão ECONNRESET/EAI_AGAIN ao baixar pacotes.
 RUN pnpm install --frozen-lockfile --filter "@barbearia-saas/admin-web..."
+
+# packages/shared/package.json aponta "main" pra "dist/index.js" — isso vale
+# pra QUALQUER consumidor (API, mobile, admin-web), então esse arquivo
+# compilado precisa existir de verdade, não importa o que o next.config.js
+# faça depois. (`transpilePackages` no next.config.js só muda COMO o Next
+# processa um arquivo já encontrado — ele não pula a resolução de módulo do
+# Node, que lê o "main" do package.json antes de tudo.) Sem esse passo, o
+# `next build` abaixo falha com "Module not found: Can't resolve
+# '@barbearia-saas/shared'". Usamos o `tsc` que já veio instalado dentro do
+# admin-web (typescript está nas devDependencies dele) pra não precisar
+# adicionar outra dependência só pra isso — mesmo truque do Dockerfile da API.
+RUN pnpm --filter @barbearia-saas/admin-web exec tsc -p ../../packages/shared/tsconfig.json
 
 # IMPORTANTE: variáveis NEXT_PUBLIC_* são gravadas DIRETO no JavaScript que
 # vai pro navegador NO MOMENTO DO BUILD — não é como o resto do sistema, onde
