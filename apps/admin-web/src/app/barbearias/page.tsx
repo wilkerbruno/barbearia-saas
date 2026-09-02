@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import Link from "next/link";
 import { api } from "../../lib/api";
 
 interface BarbeariaResumo {
@@ -36,8 +37,12 @@ export default function BarbeariasPage() {
           </thead>
           <tbody>
             {barbearias.map((b) => (
-              <tr key={b.id}>
-                <td style={{ fontWeight: 700 }}>{b.nome}</td>
+              <tr key={b.id} style={{ cursor: "pointer" }} onClick={() => (window.location.href = `/barbearias/${b.id}`)}>
+                <td style={{ fontWeight: 700 }}>
+                  <Link href={`/barbearias/${b.id}`} onClick={(e) => e.stopPropagation()}>
+                    {b.nome}
+                  </Link>
+                </td>
                 <td>{b.assinatura?.plano.nome ?? "—"}</td>
                 <td>{b.funcionarios.length}</td>
                 <td>{b.assinatura?.status ?? "—"}</td>

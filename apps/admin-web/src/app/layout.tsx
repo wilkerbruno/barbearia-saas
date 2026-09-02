@@ -6,11 +6,17 @@ import "./globals.css";
 import { Sidebar } from "../components/Sidebar";
 import { AuthGuard } from "../components/AuthGuard";
 
-// Layout raiz: a página /login fica fora do AuthGuard/Sidebar; todo o resto
-// do painel exige login de SAAS_ADMIN.
+// Rotas públicas ficam fora do AuthGuard/Sidebar: /login (óbvio) e
+// /pagamento-confirmado (pra onde o Mercado Pago manda o dono da barbearia de
+// volta depois do checkout — ele está no navegador do celular dele, não
+// logado no painel do SaaS).
+const ROTAS_PUBLICAS = ["/login", "/pagamento-confirmado"];
+
+// Layout raiz: as rotas públicas ficam fora do AuthGuard/Sidebar; todo o
+// resto do painel exige login de SAAS_ADMIN.
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isLogin = pathname === "/login";
+  const isPublica = ROTAS_PUBLICAS.includes(pathname ?? "");
 
   return (
     <html lang="pt-BR">
@@ -18,7 +24,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <title>BarberOS — Painel SaaS</title>
       </head>
       <body>
-        {isLogin ? (
+        {isPublica ? (
           children
         ) : (
           <AuthGuard>

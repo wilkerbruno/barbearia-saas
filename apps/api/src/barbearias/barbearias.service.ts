@@ -32,7 +32,10 @@ export class BarbeariasService {
   async buscarPorId(id: string) {
     const barbearia = await this.prisma.barbearia.findUnique({
       where: { id },
-      include: { assinatura: { include: { plano: true } } },
+      include: {
+        assinatura: { include: { plano: true, faturas: { orderBy: { vencimentoEm: "desc" }, take: 12 } } },
+        funcionarios: { include: { usuario: { select: { id: true, nome: true, email: true } } } },
+      },
     });
     if (!barbearia) throw new NotFoundException("Barbearia não encontrada.");
     return barbearia;

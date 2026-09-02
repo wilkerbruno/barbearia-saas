@@ -49,13 +49,15 @@ export class FinanceiroService {
     };
   }
 
-  // Resumo consolidado da barbearia inteira (app do dono), com detalhamento por funcionário.
+  // Resumo consolidado da barbearia inteira (app do dono), com detalhamento por
+  // funcionário e por serviço/pacote (pra saber o que realmente traz receita).
   async resumoBarbearia(barbeariaId: string, periodo: Periodo) {
     const { inicio, fim } = intervaloPara(periodo);
 
     const [agendamentos, funcionarios] = await Promise.all([
       this.prisma.agendamento.findMany({
         where: { barbeariaId, status: StatusAgendamento.CONCLUIDO, inicio: { gte: inicio, lte: fim } },
+        include: { servico: true, pacote: true },
       }),
       this.prisma.funcionario.findMany({ where: { barbeariaId }, include: { usuario: true } }),
     ]);
@@ -73,6 +75,16 @@ export class FinanceiroService {
       };
     });
 
+    const porServicoMap = new Map<string, { nome: string; atendimentos: number; faturamentoCentavos: number }>();
+    for (const a of agendamentos) {
+      const nome = a.servico?.nome ?? a.pacote?.nome ?? "Outro";
+      const atual = porServicoMap.get(nome) ?? { nome, atendimentos: 0, faturamentoCentavos: 0 };
+      atual.atendimentos += 1;
+      atual.faturamentoCentavos += a.precoCentavos;
+      porServicoMap.set(nome, atual);
+    }
+    const porServico = Array.from(porServicoMap.values()).sort((a, b) => b.faturamentoCentavos - a.faturamentoCentavos);
+
     const faturamentoCentavos = porFuncionario.reduce((soma, f) => soma + f.faturamentoCentavos, 0);
     const comissoesCentavos = porFuncionario.reduce((soma, f) => soma + f.comissaoCentavos, 0);
 
@@ -83,6 +95,7 @@ export class FinanceiroService {
       comissoesCentavos,
       lucroCentavos: faturamentoCentavos - comissoesCentavos,
       porFuncionario,
+      porServico,
     };
   }
 }

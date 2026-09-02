@@ -14,6 +14,7 @@ interface ResumoBarbearia {
   comissoesCentavos: number;
   lucroCentavos: number;
   porFuncionario: Array<{ nome: string; atendimentos: number; faturamentoCentavos: number; comissaoCentavos: number }>;
+  porServico: Array<{ nome: string; atendimentos: number; faturamentoCentavos: number }>;
 }
 
 const PERIODOS: Array<{ key: ResumoFinanceiro["periodo"]; label: string }> = [
@@ -74,6 +75,20 @@ export function BarbeariaFinanceiroScreen() {
                   <PriceTag centavos={f.faturamentoCentavos} />
                   <Text style={{ fontSize: 11, color: colors.inkMuted }}>com. {(f.comissaoCentavos / 100).toFixed(2)}</Text>
                 </View>
+              </Card>
+            ))}
+
+            <Text style={styles.sectionTitle}>Por serviço</Text>
+            {resumo.porServico.length === 0 && (
+              <Text style={{ fontSize: 12, color: colors.inkMuted }}>Nenhum atendimento concluído nesse período.</Text>
+            )}
+            {resumo.porServico.map((s) => (
+              <Card key={s.nome} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <View>
+                  <Text style={{ fontWeight: "700", color: colors.ink }}>{s.nome}</Text>
+                  <Text style={{ fontSize: 12, color: colors.inkMuted }}>{s.atendimentos} atendimentos</Text>
+                </View>
+                <PriceTag centavos={s.faturamentoCentavos} />
               </Card>
             ))}
           </View>
