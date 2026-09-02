@@ -21,7 +21,7 @@ export function MaisStackNavigator() {
   return (
     <Stack.Navigator screenOptions={{ ...darkStackScreenOptions, headerShown: false }}>
       <Stack.Screen name="Mais" component={MaisScreen} />
-      <Stack.Screen name="Servicos" component={ServicosScreen} options={{ headerShown: true, title: "Serviços e pacotes" }} />
+      <Stack.Screen name="Servicos" component={ServicosScreen} options={{ headerShown: true, title: "Serviços" }} />
       <Stack.Screen name="Equipe" component={EquipeScreen} options={{ headerShown: true, title: "Equipe" }} />
       <Stack.Screen name="Assinatura" component={AssinaturaScreen} options={{ headerShown: true, title: "Assinatura" }} />
       <Stack.Screen name="Localizacao" component={LocalizacaoScreen} options={{ headerShown: true, title: "Localização" }} />

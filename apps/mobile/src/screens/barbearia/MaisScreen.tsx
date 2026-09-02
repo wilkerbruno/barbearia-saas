@@ -13,7 +13,7 @@ export function MaisScreen({ navigation }: Props) {
   const logout = useAuthStore((s) => s.logout);
 
   const itens: Array<{ label: string; onPress: () => void }> = [
-    { label: "Serviços e pacotes", onPress: () => navigation.navigate("Servicos") },
+    { label: "Serviços", onPress: () => navigation.navigate("Servicos") },
     { label: "Equipe", onPress: () => navigation.navigate("Equipe") },
     { label: "Localização", onPress: () => navigation.navigate("Localizacao") },
     { label: "Assinatura do plano", onPress: () => navigation.navigate("Assinatura") },
