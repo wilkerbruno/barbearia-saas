@@ -1,18 +1,20 @@
 import { randomUUID } from "crypto";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { Funcionario, Folga, HorarioTrabalho } from "@prisma/client";
 import { Papel, StatusAgendamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateAgendamentoDto } from "./dto/create-agendamento.dto";
 import { CreateAgendamentoLoteDto } from "./dto/create-agendamento-lote.dto";
 import { AuthUser } from "../auth/jwt.strategy";
 
-// Horário de funcionamento fixo do MVP (todo dia, mesma janela). Um próximo
-// passo natural é deixar isso configurável por barbearia (ver README/roadmap).
-const HORARIO_ABERTURA = 9; // 09:00
-const HORARIO_FECHAMENTO = 19; // 19:00
-const INTERVALO_ENTRE_INICIOS_MINUTOS = 30; // de quanto em quanto tempo um novo horário pode começar
+// De quanto em quanto tempo um novo horário pode começar (ex: 09:00, 09:30,
+// 10:00...). O expediente em si (dias, hora de início/fim, almoço) agora vem
+// do HorarioTrabalho de cada funcionário, cadastrado por ele mesmo no app.
+const INTERVALO_ENTRE_INICIOS_MINUTOS = 30;
 
 const STATUS_ATIVOS = [StatusAgendamento.PENDENTE, StatusAgendamento.CONFIRMADO];
+
+type FuncionarioComAgenda = Funcionario & { horarios: HorarioTrabalho[]; folgas: Folga[] };
 
 interface ItemResolvido {
   servicoId?: string;
@@ -27,19 +29,11 @@ export class AgendamentosService {
   constructor(private prisma: PrismaService) {}
 
   async criar(clienteId: string, dto: CreateAgendamentoDto) {
-    const funcionario = await this.prisma.funcionario.findUnique({ where: { id: dto.funcionarioId } });
-    if (!funcionario || !funcionario.ativo || !funcionario.disponivel) {
-      throw new BadRequestException("Profissional indisponível para agendamento.");
-    }
-
     const item = await this.resolverItem({ servicoId: dto.servicoId, pacoteId: dto.pacoteId });
-    if (funcionario.barbeariaId !== item.barbeariaId) {
-      throw new BadRequestException("Este profissional não atende essa barbearia.");
-    }
 
     const inicio = new Date(dto.inicio);
     const fim = new Date(inicio.getTime() + item.duracaoMinutos * 60_000);
-    await this.garantirFuncionarioLivre(dto.funcionarioId, inicio, fim);
+    await this.garantirFuncionarioLivre(dto.funcionarioId, inicio, fim, item.barbeariaId);
 
     return this.prisma.agendamento.create({
       data: {
@@ -113,17 +107,25 @@ export class AgendamentosService {
     const inicioMes = new Date(ano, mes - 1, 1, 0, 0, 0, 0);
     const inicioProximoMes = new Date(ano, mes, 1, 0, 0, 0, 0);
 
-    const funcionarioIds = await this.funcionariosAtivos(barbeariaId);
-    if (funcionarioIds.length === 0) return [];
+    const funcionarios = await this.funcionariosComAgenda(barbeariaId, inicioMes, inicioProximoMes);
+    if (funcionarios.length === 0) return [];
 
-    const agendamentos = await this.buscarAgendamentosNoIntervalo(funcionarioIds, inicioMes, inicioProximoMes);
+    const agendamentos = await this.buscarAgendamentosNoIntervalo(
+      funcionarios.map((f) => f.id),
+      inicioMes,
+      inicioProximoMes,
+    );
     const agora = new Date();
 
     const dias: string[] = [];
     for (let dia = new Date(inicioMes); dia < inicioProximoMes; dia.setDate(dia.getDate() + 1)) {
-      const slots = gerarSlotsDoDia(dia, duracaoMinutos);
-      const temHorarioLivre = slots.some(
-        (slot) => slot.inicio > agora && funcionarioIds.some((fid) => slotLivre(agendamentos, fid, slot.inicio, slot.fim)),
+      const temHorarioLivre = funcionarios.some((funcionario) =>
+        slotsDoFuncionarioNoDia(funcionario, dia, duracaoMinutos).some(
+          (slot) =>
+            slot.inicio > agora &&
+            slotLivre(agendamentos, funcionario.id, slot.inicio, slot.fim) &&
+            folgaLivre(funcionario.folgas, slot.inicio, slot.fim),
+        ),
       );
       if (temHorarioLivre) dias.push(formatarData(dia));
     }
@@ -138,16 +140,27 @@ export class AgendamentosService {
     const proximoDia = new Date(dia);
     proximoDia.setDate(proximoDia.getDate() + 1);
 
-    const funcionarioIds = funcionarioId ? [funcionarioId] : await this.funcionariosAtivos(barbeariaId);
-    if (funcionarioIds.length === 0) return [];
+    const todosFuncionarios = await this.funcionariosComAgenda(barbeariaId, dia, proximoDia);
+    const funcionarios = funcionarioId ? todosFuncionarios.filter((f) => f.id === funcionarioId) : todosFuncionarios;
+    if (funcionarios.length === 0) return [];
 
-    const agendamentos = await this.buscarAgendamentosNoIntervalo(funcionarioIds, dia, proximoDia);
+    const agendamentos = await this.buscarAgendamentosNoIntervalo(
+      funcionarios.map((f) => f.id),
+      dia,
+      proximoDia,
+    );
     const agora = new Date();
 
-    return gerarSlotsDoDia(dia, duracaoMinutos)
-      .filter((slot) => slot.inicio > agora)
-      .filter((slot) => funcionarioIds.some((fid) => slotLivre(agendamentos, fid, slot.inicio, slot.fim)))
-      .map((slot) => formatarHorario(slot.inicio));
+    const horariosUnicos = new Set<string>();
+    for (const funcionario of funcionarios) {
+      for (const slot of slotsDoFuncionarioNoDia(funcionario, dia, duracaoMinutos)) {
+        if (slot.inicio <= agora) continue;
+        if (!slotLivre(agendamentos, funcionario.id, slot.inicio, slot.fim)) continue;
+        if (!folgaLivre(funcionario.folgas, slot.inicio, slot.fim)) continue;
+        horariosUnicos.add(formatarHorario(slot.inicio));
+      }
+    }
+    return Array.from(horariosUnicos).sort();
   }
 
   listarMeusComoCliente(clienteId: string) {
@@ -255,14 +268,43 @@ export class AgendamentosService {
     throw new BadRequestException("Informe um serviço ou um pacote para cada item do agendamento.");
   }
 
+  // Busca os funcionários ativos/disponíveis da barbearia junto com o
+  // expediente semanal e as folgas que caem dentro do intervalo pedido —
+  // tudo que é preciso pra calcular disponibilidade sem novas queries por dia.
+  private funcionariosComAgenda(barbeariaId: string, inicioIntervalo: Date, fimIntervalo: Date) {
+    return this.prisma.funcionario.findMany({
+      where: { barbeariaId, ativo: true, disponivel: true },
+      include: {
+        horarios: true,
+        folgas: { where: { inicio: { lt: fimIntervalo }, fim: { gt: inicioIntervalo } } },
+      },
+    });
+  }
+
   private async garantirFuncionarioLivre(funcionarioId: string, inicio: Date, fim: Date, barbeariaId?: string) {
-    const funcionario = await this.prisma.funcionario.findUnique({ where: { id: funcionarioId } });
+    const funcionario = await this.prisma.funcionario.findUnique({
+      where: { id: funcionarioId },
+      include: {
+        horarios: true,
+        folgas: { where: { inicio: { lt: fim }, fim: { gt: inicio } } },
+      },
+    });
     if (!funcionario || !funcionario.ativo || !funcionario.disponivel) {
       throw new BadRequestException("Profissional indisponível para agendamento.");
     }
     if (barbeariaId && funcionario.barbeariaId !== barbeariaId) {
       throw new BadRequestException("Este profissional não atende essa barbearia.");
     }
+
+    if (funcionario.folgas.some((f) => f.inicio < fim && f.fim > inicio)) {
+      throw new BadRequestException("Profissional de folga nesse horário. Escolha outro horário ou profissional.");
+    }
+    if (!dentroDoExpediente(funcionario, inicio, fim)) {
+      throw new BadRequestException(
+        "Horário fora do expediente do profissional (ou durante o horário de almoço). Escolha outro horário.",
+      );
+    }
+
     const conflito = await this.prisma.agendamento.findFirst({
       where: { funcionarioId, status: { in: STATUS_ATIVOS }, inicio: { lt: fim }, fim: { gt: inicio } },
     });
@@ -271,20 +313,26 @@ export class AgendamentosService {
   }
 
   private async escolherFuncionarioDisponivel(barbeariaId: string, inicio: Date, fim: Date) {
-    const funcionarios = await this.prisma.funcionario.findMany({ where: { barbeariaId, ativo: true, disponivel: true } });
+    const funcionarios = await this.prisma.funcionario.findMany({
+      where: { barbeariaId, ativo: true, disponivel: true },
+      include: {
+        horarios: true,
+        folgas: { where: { inicio: { lt: fim }, fim: { gt: inicio } } },
+      },
+    });
+
     for (const funcionario of funcionarios) {
+      if (funcionario.folgas.some((f) => f.inicio < fim && f.fim > inicio)) continue;
+      if (!dentroDoExpediente(funcionario, inicio, fim)) continue;
+
       const conflito = await this.prisma.agendamento.findFirst({
         where: { funcionarioId: funcionario.id, status: { in: STATUS_ATIVOS }, inicio: { lt: fim }, fim: { gt: inicio } },
       });
       if (!conflito) return funcionario.id;
     }
-    throw new BadRequestException("Nenhum profissional disponível nesse horário. Escolha outro horário.");
-  }
-
-  private funcionariosAtivos(barbeariaId: string) {
-    return this.prisma.funcionario
-      .findMany({ where: { barbeariaId, ativo: true, disponivel: true }, select: { id: true } })
-      .then((lista) => lista.map((f) => f.id));
+    throw new BadRequestException(
+      "Nenhum profissional trabalha nesse horário. Escolha outro dia/horário — ou verifique se algum funcionário já cadastrou sua agenda.",
+    );
   }
 
   private buscarAgendamentosNoIntervalo(funcionarioIds: string[], inicio: Date, fim: Date) {
@@ -295,21 +343,58 @@ export class AgendamentosService {
   }
 }
 
-function gerarSlotsDoDia(dia: Date, duracaoMinutos: number): { inicio: Date; fim: Date }[] {
-  const abertura = new Date(dia);
-  abertura.setHours(HORARIO_ABERTURA, 0, 0, 0);
-  const fechamento = new Date(dia);
-  fechamento.setHours(HORARIO_FECHAMENTO, 0, 0, 0);
+// Quebra o expediente de um dia em uma ou duas janelas (antes/depois do
+// almoço, se houver). Sem almoço cadastrado, é uma janela só.
+function gerarJanelasDoDia(horario: HorarioTrabalho, dia: Date): { inicio: Date; fim: Date }[] {
+  const inicio = combinarDataHora(dia, horario.horaInicio);
+  const fim = combinarDataHora(dia, horario.horaFim);
+
+  if (horario.inicioAlmoco && horario.fimAlmoco) {
+    const inicioAlmoco = combinarDataHora(dia, horario.inicioAlmoco);
+    const fimAlmoco = combinarDataHora(dia, horario.fimAlmoco);
+    return [
+      { inicio, fim: inicioAlmoco },
+      { inicio: fimAlmoco, fim },
+    ];
+  }
+  return [{ inicio, fim }];
+}
+
+// Gera os horários de início possíveis (de INTERVALO_ENTRE_INICIOS_MINUTOS em
+// INTERVALO_ENTRE_INICIOS_MINUTOS) pro funcionário num dia, considerando seu
+// expediente cadastrado (HorarioTrabalho) — se ele não trabalha nesse dia da
+// semana, retorna lista vazia.
+function slotsDoFuncionarioNoDia(
+  funcionario: FuncionarioComAgenda,
+  dia: Date,
+  duracaoMinutos: number,
+): { inicio: Date; fim: Date }[] {
+  const diaSemana = dia.getDay();
+  const horario = funcionario.horarios.find((h) => h.diaSemana === diaSemana);
+  if (!horario) return [];
 
   const slots: { inicio: Date; fim: Date }[] = [];
-  for (
-    let inicio = new Date(abertura);
-    new Date(inicio.getTime() + duracaoMinutos * 60_000) <= fechamento;
-    inicio = new Date(inicio.getTime() + INTERVALO_ENTRE_INICIOS_MINUTOS * 60_000)
-  ) {
-    slots.push({ inicio: new Date(inicio), fim: new Date(inicio.getTime() + duracaoMinutos * 60_000) });
+  for (const janela of gerarJanelasDoDia(horario, dia)) {
+    for (
+      let inicio = new Date(janela.inicio);
+      addMinutos(inicio, duracaoMinutos) <= janela.fim;
+      inicio = addMinutos(inicio, INTERVALO_ENTRE_INICIOS_MINUTOS)
+    ) {
+      slots.push({ inicio: new Date(inicio), fim: addMinutos(inicio, duracaoMinutos) });
+    }
   }
   return slots;
+}
+
+// Confere se [inicio, fim) cabe inteiro dentro de alguma janela do expediente
+// do funicionário no dia de "inicio" — usado na hora de CRIAR o agendamento
+// (fora do fluxo de "listar slots"), pra bloquear tentativas de marcar direto
+// na API fora do horário de trabalho ou durante o almoço.
+function dentroDoExpediente(funcionario: FuncionarioComAgenda, inicio: Date, fim: Date): boolean {
+  const diaSemana = inicio.getDay();
+  const horario = funcionario.horarios.find((h) => h.diaSemana === diaSemana);
+  if (!horario) return false;
+  return gerarJanelasDoDia(horario, inicio).some((janela) => inicio >= janela.inicio && fim <= janela.fim);
 }
 
 function slotLivre(
@@ -319,6 +404,21 @@ function slotLivre(
   fim: Date,
 ): boolean {
   return !agendamentos.some((a) => a.funcionarioId === funcionarioId && a.inicio < fim && a.fim > inicio);
+}
+
+function folgaLivre(folgas: { inicio: Date; fim: Date }[], inicio: Date, fim: Date): boolean {
+  return !folgas.some((f) => f.inicio < fim && f.fim > inicio);
+}
+
+function combinarDataHora(dia: Date, horaMinuto: string): Date {
+  const [horas, minutos] = horaMinuto.split(":").map(Number);
+  const data = new Date(dia);
+  data.setHours(horas, minutos, 0, 0);
+  return data;
+}
+
+function addMinutos(data: Date, minutos: number): Date {
+  return new Date(data.getTime() + minutos * 60_000);
 }
 
 function formatarData(data: Date): string {

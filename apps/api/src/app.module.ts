@@ -6,6 +6,7 @@ import { AuthModule } from "./auth/auth.module";
 import { BarbeariasModule } from "./barbearias/barbearias.module";
 import { ServicosModule } from "./servicos/servicos.module";
 import { AgendamentosModule } from "./agendamentos/agendamentos.module";
+import { FuncionariosModule } from "./funcionarios/funcionarios.module";
 import { FinanceiroModule } from "./financeiro/financeiro.module";
 import { PlanosModule } from "./planos/planos.module";
 import { AssinaturasModule } from "./assinaturas/assinaturas.module";
@@ -20,6 +21,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
     BarbeariasModule,
     ServicosModule,
     AgendamentosModule,
+    FuncionariosModule,
     FinanceiroModule,
     PlanosModule,
     AssinaturasModule,

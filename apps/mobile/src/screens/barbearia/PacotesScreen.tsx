@@ -1,32 +1,38 @@
 import React, { useCallback, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-import { centavosParaReais, Servico } from "@barbearia-saas/shared";
+import { Ionicons } from "@expo/vector-icons";
+import { centavosParaReais, Pacote, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { colors, radius, spacing } from "../../theme/tokens";
 
-const SERVICO_VAZIO = { nome: "", duracaoMinutos: "30", precoReais: "", descricao: "" };
+const PACOTE_VAZIO = { nome: "", precoReais: "", descricao: "" };
 
-// Onde a barbearia "coloca preço nos trabalhos" — o pedido original do produto.
-// Pacotes (agrupar vários serviços com um preço próprio) já existem na API
-// (POST/PATCH /pacotes), mas ainda não têm uma tela própria aqui — só serviços
-// avulsos por enquanto.
-export function ServicosScreen() {
+// Pacotes agrupam vários serviços com um preço combinado (ex: corte + barba
+// saindo mais barato do que os dois avulsos) — mesma lógica de tela do
+// ServicosScreen, com a lista de serviços incluídos escolhida por checkbox.
+export function PacotesScreen() {
   const barbeariaId = useAuthStore((s) => s.usuario?.barbeariaId);
+  const [pacotes, setPacotes] = useState<Pacote[]>([]);
   const [servicos, setServicos] = useState<Servico[]>([]);
   const [formAberto, setFormAberto] = useState(false);
   const [editandoId, setEditandoId] = useState<string | null>(null);
-  const [campos, setCampos] = useState(SERVICO_VAZIO);
+  const [campos, setCampos] = useState(PACOTE_VAZIO);
+  const [servicoIdsSelecionados, setServicoIdsSelecionados] = useState<string[]>([]);
   const [salvando, setSalvando] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!barbeariaId) return;
-    const { data } = await api.get<Servico[]>(`/barbearias/${barbeariaId}/servicos`);
-    setServicos(data);
+    const [pacotesRes, servicosRes] = await Promise.all([
+      api.get<Pacote[]>(`/barbearias/${barbeariaId}/pacotes`),
+      api.get<Servico[]>(`/barbearias/${barbeariaId}/servicos`),
+    ]);
+    setPacotes(pacotesRes.data);
+    setServicos(servicosRes.data);
   }, [barbeariaId]);
 
   useFocusEffect(
@@ -37,41 +43,52 @@ export function ServicosScreen() {
 
   function abrirNovo() {
     setEditandoId(null);
-    setCampos(SERVICO_VAZIO);
+    setCampos(PACOTE_VAZIO);
+    setServicoIdsSelecionados([]);
     setFormAberto(true);
   }
 
-  function abrirEdicao(servico: Servico) {
-    setEditandoId(servico.id);
+  function abrirEdicao(pacote: Pacote) {
+    setEditandoId(pacote.id);
     setCampos({
-      nome: servico.nome,
-      duracaoMinutos: String(servico.duracaoMinutos),
-      precoReais: (servico.precoCentavos / 100).toFixed(2),
-      descricao: servico.descricao ?? "",
+      nome: pacote.nome,
+      precoReais: (pacote.precoCentavos / 100).toFixed(2),
+      descricao: pacote.descricao ?? "",
     });
+    setServicoIdsSelecionados(pacote.servicos.map((ps) => ps.servicoId));
     setFormAberto(true);
+  }
+
+  function alternarServico(servicoId: string) {
+    setServicoIdsSelecionados((atual) =>
+      atual.includes(servicoId) ? atual.filter((id) => id !== servicoId) : [...atual, servicoId],
+    );
   }
 
   async function salvar() {
     const nome = campos.nome.trim();
-    const duracaoMinutos = parseInt(campos.duracaoMinutos, 10);
     const precoCentavos = Math.round(parseFloat(campos.precoReais.replace(",", ".")) * 100);
 
-    if (!nome) return Alert.alert("Falta o nome", "Digite o nome do serviço.");
-    if (!Number.isInteger(duracaoMinutos) || duracaoMinutos < 5) {
-      return Alert.alert("Duração inválida", "Digite uma duração em minutos (mínimo 5).");
-    }
+    if (!nome) return Alert.alert("Falta o nome", "Digite o nome do pacote.");
     if (!Number.isFinite(precoCentavos) || precoCentavos <= 0) {
-      return Alert.alert("Preço inválido", "Digite um preço maior que zero (ex: 45,00).");
+      return Alert.alert("Preço inválido", "Digite um preço maior que zero (ex: 70,00).");
+    }
+    if (servicoIdsSelecionados.length === 0) {
+      return Alert.alert("Selecione os serviços", "Escolha pelo menos um serviço pra incluir no pacote.");
     }
 
-    const dto = { nome, duracaoMinutos, precoCentavos, descricao: campos.descricao.trim() || undefined };
+    const dto = {
+      nome,
+      precoCentavos,
+      descricao: campos.descricao.trim() || undefined,
+      servicoIds: servicoIdsSelecionados,
+    };
     setSalvando(true);
     try {
       if (editandoId) {
-        await api.patch(`/servicos/${editandoId}`, dto);
+        await api.patch(`/pacotes/${editandoId}`, dto);
       } else {
-        await api.post("/servicos", dto);
+        await api.post("/pacotes", dto);
       }
       setFormAberto(false);
       carregar();
@@ -82,55 +99,45 @@ export function ServicosScreen() {
     }
   }
 
-  // A API não tem um "excluir de verdade" pra serviço (só desativar — ver
-  // removerServico no backend, que preserva o histórico de agendamentos que já
-  // usaram esse serviço). Por isso só existe Ativar/Desativar aqui, sem um
-  // botão de "Excluir" separado que prometeria algo diferente do que acontece.
-  async function alternarAtivo(servico: Servico) {
-    await api.patch(`/servicos/${servico.id}`, { ativo: !servico.ativo });
+  async function alternarAtivo(pacote: Pacote) {
+    await api.patch(`/pacotes/${pacote.id}`, { ativo: !pacote.ativo });
     carregar();
   }
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Serviços</Text>
-        {!formAberto && <Text style={styles.addButton} onPress={abrirNovo}>+ Novo</Text>}
+        <Text style={styles.title}>Pacotes</Text>
+        {!formAberto && (
+          <Text style={styles.addButton} onPress={abrirNovo}>
+            + Novo
+          </Text>
+        )}
       </View>
 
       <FlatList
-        data={servicos}
+        data={pacotes}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         ListHeaderComponent={
           formAberto ? (
             <Card style={{ gap: spacing.sm, marginBottom: spacing.lg }}>
-              <Text style={styles.formTitle}>{editandoId ? "Editar serviço" : "Novo serviço"}</Text>
+              <Text style={styles.formTitle}>{editandoId ? "Editar pacote" : "Novo pacote"}</Text>
               <TextInput
                 value={campos.nome}
                 onChangeText={(nome) => setCampos((c) => ({ ...c, nome }))}
-                placeholder="Nome (ex: Corte de cabelo)"
+                placeholder="Nome (ex: Corte + Barba)"
                 placeholderTextColor={colors.inkMuted}
                 style={styles.input}
               />
-              <View style={{ flexDirection: "row", gap: spacing.sm }}>
-                <TextInput
-                  value={campos.duracaoMinutos}
-                  onChangeText={(duracaoMinutos) => setCampos((c) => ({ ...c, duracaoMinutos }))}
-                  placeholder="Duração (min)"
-                  placeholderTextColor={colors.inkMuted}
-                  keyboardType="number-pad"
-                  style={[styles.input, { flex: 1 }]}
-                />
-                <TextInput
-                  value={campos.precoReais}
-                  onChangeText={(precoReais) => setCampos((c) => ({ ...c, precoReais }))}
-                  placeholder="Preço (R$)"
-                  placeholderTextColor={colors.inkMuted}
-                  keyboardType="decimal-pad"
-                  style={[styles.input, { flex: 1 }]}
-                />
-              </View>
+              <TextInput
+                value={campos.precoReais}
+                onChangeText={(precoReais) => setCampos((c) => ({ ...c, precoReais }))}
+                placeholder="Preço combinado (R$)"
+                placeholderTextColor={colors.inkMuted}
+                keyboardType="decimal-pad"
+                style={styles.input}
+              />
               <TextInput
                 value={campos.descricao}
                 onChangeText={(descricao) => setCampos((c) => ({ ...c, descricao }))}
@@ -138,7 +145,31 @@ export function ServicosScreen() {
                 placeholderTextColor={colors.inkMuted}
                 style={styles.input}
               />
-              <View style={{ flexDirection: "row", gap: spacing.sm }}>
+
+              <Text style={styles.subLabel}>Serviços incluídos</Text>
+              {servicos.length === 0 ? (
+                <Text style={styles.hint}>Cadastre serviços primeiro pra poder agrupá-los num pacote.</Text>
+              ) : (
+                <View style={{ gap: spacing.xs }}>
+                  {servicos.map((s) => {
+                    const selecionado = servicoIdsSelecionados.includes(s.id);
+                    return (
+                      <Pressable key={s.id} onPress={() => alternarServico(s.id)} style={styles.checkboxLinha}>
+                        <Ionicons
+                          name={selecionado ? "checkbox" : "square-outline"}
+                          size={20}
+                          color={selecionado ? colors.accent : colors.inkMuted}
+                        />
+                        <Text style={styles.checkboxTexto}>
+                          {s.nome} · {centavosParaReais(s.precoCentavos)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+
+              <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.xs }}>
                 <View style={{ flex: 1 }}>
                   <Button label="Cancelar" variant="secondary" onPress={() => setFormAberto(false)} />
                 </View>
@@ -150,16 +181,15 @@ export function ServicosScreen() {
           ) : null
         }
         ListEmptyComponent={
-          !formAberto ? <Text style={styles.empty}>Nenhum serviço cadastrado ainda. Toque em "+ Novo".</Text> : null
+          !formAberto ? <Text style={styles.empty}>Nenhum pacote cadastrado ainda. Toque em "+ Novo".</Text> : null
         }
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, gap: spacing.xs, opacity: item.ativo ? 1 : 0.5 }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
               <View style={{ flex: 1, paddingRight: spacing.sm }}>
                 <Text style={styles.name}>{item.nome}</Text>
-                <Text style={styles.meta}>
-                  {item.duracaoMinutos} min · {centavosParaReais(item.precoCentavos)}
-                </Text>
+                <Text style={styles.meta}>{centavosParaReais(item.precoCentavos)}</Text>
+                <Text style={styles.meta}>{item.servicos.map((ps) => ps.servico.nome).join(", ")}</Text>
                 {item.descricao ? <Text style={styles.meta}>{item.descricao}</Text> : null}
               </View>
               <Text style={styles.editButton} onPress={() => abrirEdicao(item)}>
@@ -190,6 +220,10 @@ const styles = StyleSheet.create({
   list: { padding: spacing.xl },
   empty: { color: colors.inkMuted, fontSize: 13, textAlign: "center", marginTop: spacing.xxl },
   formTitle: { fontSize: 14, fontWeight: "800", color: colors.ink },
+  subLabel: { fontSize: 12, fontWeight: "700", color: colors.inkMuted, marginTop: spacing.xs },
+  hint: { fontSize: 12, color: colors.inkMuted },
+  checkboxLinha: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  checkboxTexto: { fontSize: 13, color: colors.ink },
   name: { fontWeight: "700", color: colors.ink, fontSize: 14 },
   meta: { fontSize: 12, color: colors.inkMuted, marginTop: 2 },
   editButton: { color: colors.accent, fontWeight: "700", fontSize: 12 },

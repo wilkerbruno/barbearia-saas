@@ -49,6 +49,8 @@ export function FuncionarioAgendaScreen() {
               <Text style={styles.time}>{new Date(item.inicio).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</Text>
               <StatusBadge status={item.status} />
             </View>
+            <Text style={styles.meta}>{item.servico?.nome ?? item.pacote?.nome ?? "Serviço"}</Text>
+            {item.cliente?.nome ? <Text style={styles.meta}>{item.cliente.nome}</Text> : null}
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <PriceTag centavos={item.precoCentavos} />
               <Text style={styles.concluir} onPress={() => concluir(item.id)}>
@@ -68,5 +70,6 @@ const styles = StyleSheet.create({
   list: { padding: spacing.xl },
   empty: { color: colors.inkMuted, fontSize: 13, textAlign: "center", marginTop: spacing.xxl },
   time: { fontWeight: "800", color: colors.ink },
+  meta: { fontSize: 12, color: colors.inkMuted },
   concluir: { color: colors.accent, fontWeight: "700", fontSize: 12 },
 });

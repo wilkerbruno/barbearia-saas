@@ -3,12 +3,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { FuncionarioAgendaScreen } from "../screens/funcionario/AgendaScreen";
 import { FuncionarioFinanceiroScreen } from "../screens/funcionario/FinanceiroScreen";
+import { FuncionarioHorariosScreen } from "../screens/funcionario/HorariosScreen";
 import { FuncionarioPerfilScreen } from "../screens/funcionario/PerfilScreen";
 import { tabBarScreenOptions } from "./tabBarOptions";
 
 const Tab = createBottomTabNavigator();
 
-// Navegação do papel FUNCIONARIO: Agenda, Financeiro e Perfil.
+// Navegação do papel FUNCIONARIO: Agenda, Horários, Financeiro e Perfil.
 export function FuncionarioTabs() {
   return (
     <Tab.Navigator screenOptions={tabBarScreenOptions}>
@@ -16,6 +17,11 @@ export function FuncionarioTabs() {
         name="Agenda"
         component={FuncionarioAgendaScreen}
         options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "calendar" : "calendar-outline"} size={size} color={color} /> }}
+      />
+      <Tab.Screen
+        name="Horários"
+        component={FuncionarioHorariosScreen}
+        options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "time" : "time-outline"} size={size} color={color} /> }}
       />
       <Tab.Screen
         name="Financeiro"

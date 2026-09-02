@@ -38,13 +38,16 @@ export function BarbeariaAgendaScreen() {
         refreshing={carregando}
         onRefresh={carregar}
         ListEmptyComponent={!carregando ? <Text style={styles.empty}>Nenhum agendamento hoje.</Text> : null}
-        renderItem={({ item }: any) => (
+        renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, gap: spacing.xs }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
               <Text style={styles.time}>{new Date(item.inicio).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</Text>
               <StatusBadge status={item.status} />
             </View>
-            <Text style={styles.meta}>{item.funcionario?.usuario?.nome}</Text>
+            <Text style={styles.meta}>{item.servico?.nome ?? item.pacote?.nome ?? "Serviço"}</Text>
+            <Text style={styles.meta}>
+              {item.cliente?.nome} · {item.funcionario?.usuario?.nome}
+            </Text>
             <PriceTag centavos={item.precoCentavos} />
           </Card>
         )}

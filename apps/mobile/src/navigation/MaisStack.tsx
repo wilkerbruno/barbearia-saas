@@ -2,6 +2,7 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { MaisScreen } from "../screens/barbearia/MaisScreen";
 import { ServicosScreen } from "../screens/barbearia/ServicosScreen";
+import { PacotesScreen } from "../screens/barbearia/PacotesScreen";
 import { EquipeScreen } from "../screens/barbearia/EquipeScreen";
 import { AssinaturaScreen } from "../screens/barbearia/AssinaturaScreen";
 import { LocalizacaoScreen } from "../screens/barbearia/LocalizacaoScreen";
@@ -10,6 +11,7 @@ import { darkStackScreenOptions } from "./stackHeaderOptions";
 export type MaisStackParamList = {
   Mais: undefined;
   Servicos: undefined;
+  Pacotes: undefined;
   Equipe: undefined;
   Assinatura: undefined;
   Localizacao: undefined;
@@ -22,6 +24,7 @@ export function MaisStackNavigator() {
     <Stack.Navigator screenOptions={{ ...darkStackScreenOptions, headerShown: false }}>
       <Stack.Screen name="Mais" component={MaisScreen} />
       <Stack.Screen name="Servicos" component={ServicosScreen} options={{ headerShown: true, title: "Serviços" }} />
+      <Stack.Screen name="Pacotes" component={PacotesScreen} options={{ headerShown: true, title: "Pacotes" }} />
       <Stack.Screen name="Equipe" component={EquipeScreen} options={{ headerShown: true, title: "Equipe" }} />
       <Stack.Screen name="Assinatura" component={AssinaturaScreen} options={{ headerShown: true, title: "Assinatura" }} />
       <Stack.Screen name="Localizacao" component={LocalizacaoScreen} options={{ headerShown: true, title: "Localização" }} />

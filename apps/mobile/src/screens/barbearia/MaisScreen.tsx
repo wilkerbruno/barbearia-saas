@@ -14,6 +14,7 @@ export function MaisScreen({ navigation }: Props) {
 
   const itens: Array<{ label: string; onPress: () => void }> = [
     { label: "Serviços", onPress: () => navigation.navigate("Servicos") },
+    { label: "Pacotes", onPress: () => navigation.navigate("Pacotes") },
     { label: "Equipe", onPress: () => navigation.navigate("Equipe") },
     { label: "Localização", onPress: () => navigation.navigate("Localizacao") },
     { label: "Assinatura do plano", onPress: () => navigation.navigate("Assinatura") },

@@ -72,13 +72,22 @@ export interface Servico {
   ativo: boolean;
 }
 
+// Um serviço incluído num pacote, com o serviço já populado — é assim que a
+// API sempre devolve um Pacote (list/create/update), nunca como servicoIds
+// soltos (esse formato flat é só o formato de ENTRADA do create/update, ver
+// CreatePacoteDto na API).
+export interface PacoteServicoItem {
+  servicoId: string;
+  servico: Servico;
+}
+
 export interface Pacote {
   id: string;
   barbeariaId: string;
   nome: string;
   descricao?: string | null;
   precoCentavos: number;
-  servicoIds: string[];
+  servicos: PacoteServicoItem[];
   ativo: boolean;
 }
 
@@ -87,6 +96,48 @@ export interface FuncionarioPublico {
   id: string;
   cargo: string;
   usuario: { id: string; nome: string };
+}
+
+// ============================= EQUIPE (GESTÃO) =============================
+
+// Retorno de GET /funcionarios (visão do BARBEARIA_ADMIN sobre a própria equipe).
+export interface FuncionarioDetalhado {
+  id: string;
+  cargo: string;
+  comissaoPercentual: number;
+  ativo: boolean;
+  disponivel: boolean;
+  usuario: { id: string; nome: string; email: string };
+}
+
+// Horário de trabalho de um dia da semana (diaSemana: 0=domingo ... 6=sábado,
+// igual ao Date.getDay() do JS). Sem uma linha pra um dia = não trabalha nesse dia.
+export interface HorarioTrabalho {
+  id: string;
+  funcionarioId: string;
+  diaSemana: number;
+  horaInicio: string; // "HH:mm"
+  horaFim: string; // "HH:mm"
+  inicioAlmoco?: string | null;
+  fimAlmoco?: string | null;
+}
+
+// Corpo de PUT /funcionarios/meus-horarios — substitui a semana inteira de uma vez.
+export interface DefinirHorarioTrabalho {
+  diaSemana: number;
+  horaInicio: string;
+  horaFim: string;
+  inicioAlmoco?: string;
+  fimAlmoco?: string;
+}
+
+// Bloqueio pontual de agenda (folga, consulta, férias etc).
+export interface Folga {
+  id: string;
+  funcionarioId: string;
+  inicio: string; // ISO datetime
+  fim: string; // ISO datetime
+  motivo?: string | null;
 }
 
 // ============================= AVALIAÇÕES (ESTRELAS) =============================
@@ -126,6 +177,13 @@ export interface Agendamento {
   // Agrupa vários serviços marcados juntos no mesmo horário (ver schema.prisma).
   // Agendamentos antigos (de antes dessa funcionalidade) têm isso null.
   grupoId?: string | null;
+  // A API sempre devolve esses relacionamentos populados via `include` (ver
+  // AgendamentosService) — opcionais aqui só porque nem toda rota inclui todos
+  // (ex: listarAgendaFuncionario não inclui `funcionario`, já que é o próprio).
+  servico?: Pick<Servico, "id" | "nome" | "duracaoMinutos" | "precoCentavos"> | null;
+  pacote?: Pick<Pacote, "id" | "nome" | "precoCentavos"> | null;
+  funcionario?: { id: string; cargo: string; usuario: { id: string; nome: string } };
+  cliente?: { id: string; nome: string; telefone?: string | null };
 }
 
 // Corpo de POST /agendamentos/lote — o cliente pode marcar vários serviços

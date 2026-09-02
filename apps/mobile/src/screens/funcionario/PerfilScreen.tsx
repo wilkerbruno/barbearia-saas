@@ -5,8 +5,7 @@ import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { colors, spacing } from "../../theme/tokens";
 
-// TODO (ver protótipo de telas): disponibilidade para novos agendamentos,
-// horário de trabalho e lista de serviços que o funcionário realiza.
+// Horário de trabalho e folgas ficam na aba "Horários" (ver HorariosScreen).
 export function FuncionarioPerfilScreen() {
   const usuario = useAuthStore((s) => s.usuario);
   const logout = useAuthStore((s) => s.logout);

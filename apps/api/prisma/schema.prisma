@@ -107,8 +107,44 @@ model Funcionario {
   ativo               Boolean  @default(true)
 
   agendamentos Agendamento[] @relation("AgendamentosFuncionario")
+  horarios     HorarioTrabalho[]
+  folgas       Folga[]
 
   @@index([barbeariaId])
+}
+
+// Horário de trabalho semanal do funcionário: no máximo 1 linha por dia da
+// semana (diaSemana 0=domingo ... 6=sábado, igual ao Date.getDay() do JS).
+// A ausência de uma linha pra um dia significa que ele não trabalha nesse dia.
+// horaInicio/horaFim/inicioAlmoco/fimAlmoco ficam como texto "HH:mm" — mais
+// simples que lidar com fuso horário num tipo Time/DateTime pra algo que é só
+// "que horas do relógio local ele começa/para".
+model HorarioTrabalho {
+  id            String      @id @default(uuid())
+  funcionarioId String
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id])
+  diaSemana     Int
+  horaInicio    String
+  horaFim       String
+  inicioAlmoco  String?
+  fimAlmoco     String?
+
+  @@unique([funcionarioId, diaSemana])
+}
+
+// Bloqueio pontual de agenda (folga, consulta, férias, etc) — além do
+// horário de trabalho semanal normal. Qualquer agendamento que caia dentro
+// de [inicio, fim) é bloqueado pro cálculo de horários disponíveis.
+model Folga {
+  id            String      @id @default(uuid())
+  funcionarioId String
+  funcionario   Funcionario @relation(fields: [funcionarioId], references: [id])
+  inicio        DateTime
+  fim           DateTime
+  motivo        String?
+  criadoEm      DateTime    @default(now())
+
+  @@index([funcionarioId, inicio])
 }
 
 // ============================= CATÁLOGO: SERVIÇOS E PACOTES =============================
