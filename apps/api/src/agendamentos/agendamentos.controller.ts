@@ -2,6 +2,7 @@ import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query } 
 import { Papel } from "@barbearia-saas/shared";
 import { AgendamentosService } from "./agendamentos.service";
 import { CreateAgendamentoDto } from "./dto/create-agendamento.dto";
+import { CreateAgendamentoLoteDto } from "./dto/create-agendamento-lote.dto";
 import { Roles } from "../common/decorators/roles.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AuthUser } from "../auth/jwt.strategy";
@@ -14,6 +15,14 @@ export class AgendamentosController {
   @Post()
   criar(@Body() dto: CreateAgendamentoDto, @CurrentUser() user: AuthUser) {
     return this.agendamentosService.criar(user.id, dto);
+  }
+
+  // Vários serviços (podem se repetir, ex: 2x corte pra pai e filho) num único
+  // horário — é o que a tela de agendamento do app do cliente usa.
+  @Roles(Papel.CLIENTE)
+  @Post("lote")
+  criarLote(@Body() dto: CreateAgendamentoLoteDto, @CurrentUser() user: AuthUser) {
+    return this.agendamentosService.criarLote(user.id, dto);
   }
 
   @Roles(Papel.CLIENTE)

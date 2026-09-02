@@ -13,6 +13,7 @@ import { Papel } from "@barbearia-saas/shared";
 import { BarbeariasService } from "./barbearias.service";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
 import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
+import { AgendamentosService } from "../agendamentos/agendamentos.service";
 import { Roles } from "../common/decorators/roles.decorator";
 import { Public } from "../common/decorators/public.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -20,7 +21,10 @@ import { AuthUser } from "../auth/jwt.strategy";
 
 @Controller("barbearias")
 export class BarbeariasController {
-  constructor(private barbeariasService: BarbeariasService) {}
+  constructor(
+    private barbeariasService: BarbeariasService,
+    private agendamentosService: AgendamentosService,
+  ) {}
 
   // Painel SaaS: lista todas as barbearias assinantes da plataforma.
   @Roles(Papel.SAAS_ADMIN)
@@ -60,6 +64,35 @@ export class BarbeariasController {
   @Get(":id/funcionarios")
   listarFuncionarios(@Param("id") id: string) {
     return this.barbeariasService.listarFuncionariosPublico(id);
+  }
+
+  // Público: dias do mês com pelo menos um horário livre pra duração total dos
+  // serviços escolhidos — alimenta o calendário da tela de agendamento.
+  // mes no formato "YYYY-MM".
+  @Public()
+  @Get(":id/dias-disponiveis")
+  diasDisponiveis(
+    @Param("id") id: string,
+    @Query("mes") mes: string,
+    @Query("duracaoMinutos") duracaoMinutos?: string,
+  ) {
+    const [ano, mesNum] = (mes ?? "").split("-").map(Number);
+    if (!ano || !mesNum) throw new BadRequestException("Informe o parâmetro mes no formato YYYY-MM.");
+    return this.agendamentosService.listarDiasDisponiveis(id, ano, mesNum, Number(duracaoMinutos) || 30);
+  }
+
+  // Público: horários livres (formato "HH:mm") num dia específico, pra duração
+  // total dos serviços escolhidos. data no formato "YYYY-MM-DD".
+  @Public()
+  @Get(":id/horarios-disponiveis")
+  horariosDisponiveis(
+    @Param("id") id: string,
+    @Query("data") data: string,
+    @Query("duracaoMinutos") duracaoMinutos?: string,
+    @Query("funcionarioId") funcionarioId?: string,
+  ) {
+    if (!data) throw new BadRequestException("Informe o parâmetro data no formato YYYY-MM-DD.");
+    return this.agendamentosService.listarHorariosDisponiveis(id, data, Number(duracaoMinutos) || 30, funcionarioId);
   }
 
   @Roles(Papel.BARBEARIA_ADMIN)

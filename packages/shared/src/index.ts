@@ -123,6 +123,23 @@ export interface Agendamento {
   precoCentavos: number;
   status: StatusAgendamento;
   criadoEm: string;
+  // Agrupa vários serviços marcados juntos no mesmo horário (ver schema.prisma).
+  // Agendamentos antigos (de antes dessa funcionalidade) têm isso null.
+  grupoId?: string | null;
+}
+
+// Corpo de POST /agendamentos/lote — o cliente pode marcar vários serviços
+// (inclusive repetidos, ex: 2x corte pra pai e filho) num único horário,
+// feitos em sequência pelo mesmo profissional a partir de "inicio".
+export interface ItemAgendamentoLote {
+  servicoId?: string;
+  pacoteId?: string;
+}
+
+export interface CriarAgendamentoLoteInput {
+  funcionarioId?: string; // se omitido, o servidor escolhe qualquer profissional livre
+  inicio: string; // ISO datetime
+  itens: ItemAgendamentoLote[];
 }
 
 // ============================= FINANCEIRO =============================

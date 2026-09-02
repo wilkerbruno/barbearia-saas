@@ -18,6 +18,10 @@ FROM node:22-slim
 RUN apt-get update -y \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+# Sem isso o container roda em UTC por padrão (comum em hosts como o
+# EasyPanel), e todo cálculo de "horário disponível" feito com Date local
+# (ex: "abre às 9h") ficaria 3h adiantado em relação ao horário de Brasília.
+ENV TZ=America/Sao_Paulo
 RUN corepack enable
 WORKDIR /repo
 

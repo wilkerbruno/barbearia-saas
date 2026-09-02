@@ -173,10 +173,16 @@ model Agendamento {
   precoCentavos Int
   status        StatusAgendamento @default(CONFIRMADO)
   criadoEm      DateTime          @default(now())
+  // Agrupa vários serviços marcados juntos no mesmo "carrinho" (ex: corte +
+  // barba, ou pai e filho no mesmo horário) — cada serviço continua sendo uma
+  // linha própria (com sua duração/preço/horário sequencial), só a exibição e
+  // o cancelamento tratam o grupo como um agendamento só (ver AgendamentosService).
+  grupoId       String?
 
   @@index([barbeariaId, inicio])
   @@index([funcionarioId, inicio])
   @@index([clienteId])
+  @@index([grupoId])
 }
 
 // ============================= AVALIAÇÕES (ESTRELAS) =============================
