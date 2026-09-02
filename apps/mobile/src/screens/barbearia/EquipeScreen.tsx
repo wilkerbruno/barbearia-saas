@@ -7,6 +7,7 @@ import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { PasswordInput } from "../../components/PasswordInput";
 import { colors, radius, spacing } from "../../theme/tokens";
 
 const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", cargo: "", comissaoPercentual: "60" };
@@ -122,12 +123,11 @@ export function EquipeScreen() {
                 keyboardType="email-address"
                 style={styles.input}
               />
-              <TextInput
+              <PasswordInput
                 value={campos.senha}
                 onChangeText={(senha) => setCampos((c) => ({ ...c, senha }))}
                 placeholder="Senha (mínimo 6 caracteres)"
                 placeholderTextColor={colors.inkMuted}
-                secureTextEntry
                 style={styles.input}
               />
               <View style={{ flexDirection: "row", gap: spacing.sm }}>

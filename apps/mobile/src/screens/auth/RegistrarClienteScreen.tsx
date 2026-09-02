@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
+import { PasswordInput } from "../../components/PasswordInput";
 import { colors, radius, spacing } from "../../theme/tokens";
 
 export function RegistrarClienteScreen() {
@@ -50,7 +51,7 @@ export function RegistrarClienteScreen() {
         </View>
         <View style={styles.field}>
           <Text style={styles.label}>Senha</Text>
-          <TextInput value={senha} onChangeText={setSenha} secureTextEntry style={styles.input} placeholder="Mínimo 6 caracteres" />
+          <PasswordInput value={senha} onChangeText={setSenha} style={styles.input} placeholder="Mínimo 6 caracteres" />
         </View>
 
         {erro && <Text style={styles.erro}>{erro}</Text>}

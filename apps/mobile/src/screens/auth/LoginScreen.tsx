@@ -5,6 +5,7 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
+import { PasswordInput } from "../../components/PasswordInput";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { AuthStackParamList } from "../../navigation/AuthNavigator";
 
@@ -52,10 +53,9 @@ export function LoginScreen({ navigation }: Props) {
 
         <View style={styles.field}>
           <Text style={styles.label}>Senha</Text>
-          <TextInput
+          <PasswordInput
             value={senha}
             onChangeText={setSenha}
-            secureTextEntry
             style={styles.input}
             placeholder="••••••••"
           />

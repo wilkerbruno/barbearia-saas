@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, salvarToken } from "../../lib/api";
+import { PasswordInput } from "../../components/PasswordInput";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -44,11 +45,10 @@ export default function LoginPage() {
           type="email"
           style={inputStyle}
         />
-        <input
+        <PasswordInput
           value={senha}
           onChange={(e) => setSenha(e.target.value)}
           placeholder="Senha"
-          type="password"
           style={inputStyle}
         />
         {erro && <div style={{ color: "#C1442E", fontSize: 13 }}>{erro}</div>}
