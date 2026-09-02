@@ -116,7 +116,41 @@ usando root).
    deve ter domínio público.
 5. Faça o deploy.
 
-## 3. O que acontece automaticamente no primeiro boot
+## 3. Criar o serviço do Painel SaaS (apps/admin-web)
+
+O painel do dono da plataforma (visão geral, barbearias, planos, faturamento)
+é um app Next.js separado — precisa do seu próprio serviço no EasyPanel.
+
+1. Crie outro serviço do tipo **App**, do mesmo repositório.
+2. Configuração de build:
+   - **Build method**: Dockerfile
+   - **Build context / Root directory**: a **raiz do repositório** (mesmo
+     motivo da API — o build usa `packages/shared`)
+   - **Dockerfile path**: `apps/admin-web/Dockerfile`
+   - **Porta**: `3001`
+3. **Build variables** (não "Environment variables" — o Next.js grava essa
+   URL direto no JavaScript enviado ao navegador no momento do build, então
+   ela precisa chegar como *build arg*, não como variável de runtime; veja o
+   comentário no topo do `apps/admin-web/Dockerfile`):
+
+   ```
+   NEXT_PUBLIC_API_URL=https://sua-api.dominio.com/api
+   ```
+
+   Troque pela URL pública de verdade do serviço da API (passo 2). Se depois
+   você mudar essa URL, precisa fazer um novo deploy (rebuild) do painel, não
+   só reiniciar o container.
+
+4. Ative um **domínio** para esse serviço também (ex.: `painel.suabarbearia.com`).
+5. Faça o deploy.
+
+Se for configurar cobrança recorrente (Mercado Pago, ver
+`apps/api/.env.example` e os comentários em `AssinaturasService`), aponte
+`MERCADOPAGO_BACK_URL` (variável de ambiente da API) para
+`https://painel.suabarbearia.com/pagamento-confirmado` — é a página pra onde
+o dono da barbearia volta depois de autorizar o pagamento.
+
+## 4. O que acontece automaticamente no primeiro boot
 
 O `CMD` do `apps/api/Dockerfile` roda, nesta ordem, toda vez que o container
 sobe:
@@ -142,7 +176,7 @@ Com isso:
   corpo do exemplo no README), usando um dos `planoId` do seed
   (`plano-basico`, `plano-profissional` ou `plano-premium`).
 
-## 4. Checklist de segurança (resumo)
+## 5. Checklist de segurança (resumo)
 
 - [ ] MySQL sem domínio público e sem porta exposta à internet.
 - [ ] `DATABASE_URL` da API aponta para o **hostname interno** do MySQL
@@ -151,11 +185,12 @@ Com isso:
       que é uma concessão temporária).
 - [ ] `JWT_SECRET` é um valor longo e gerado aleatoriamente, diferente entre
       ambientes (nunca o valor de exemplo do `.env.example`).
-- [ ] Só a API tem domínio/HTTPS público.
+- [ ] Só a API e o painel (`apps/admin-web`) têm domínio/HTTPS público — o
+      MySQL nunca.
 - [ ] `SAAS_ADMIN_SENHA` é uma senha forte, não uma senha reaproveitada de
       outro lugar.
 
-## 5. Evoluindo depois
+## 6. Evoluindo depois
 
 Quando o schema do banco estabilizar (poucas mudanças de tabela por semana),
 vale trocar `prisma db push` por `prisma migrate deploy` com migrações
