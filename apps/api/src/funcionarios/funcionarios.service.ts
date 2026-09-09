@@ -74,6 +74,14 @@ export class FuncionariosService {
     });
   }
 
+  // Só o id do cadastro na equipe (Funcionario.id, diferente do id do
+  // Usuario/login) — usado pra lançar um agendamento manual na própria
+  // agenda (ver AgendamentosController.criarManual, que exige esse id).
+  async buscarMeuId(usuarioId: string) {
+    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+    return { id: funcionario.id };
+  }
+
   // ---------- Horário de trabalho (o próprio funcionário edita o seu) ----------
 
   async listarMeusHorarios(usuarioId: string) {

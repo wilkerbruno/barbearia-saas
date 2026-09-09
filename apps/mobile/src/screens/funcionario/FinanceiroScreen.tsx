@@ -56,6 +56,12 @@ export function FuncionarioFinanceiroScreen() {
               <Text style={styles.label}>Atendimentos</Text>
               <Text style={styles.count}>{resumo.atendimentos}</Text>
             </Card>
+            {!!resumo.multasCentavos && (
+              <Card style={{ backgroundColor: colors.dangerSoft }}>
+                <Text style={[styles.label, { color: colors.danger }]}>Multas de não comparecimento (incluídas no faturamento)</Text>
+                <PriceTag centavos={resumo.multasCentavos} size={16} />
+              </Card>
+            )}
           </View>
         )}
       </ScrollView>

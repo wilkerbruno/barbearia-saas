@@ -4,7 +4,16 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import { Ionicons } from "@expo/vector-icons";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { centavosParaReais, Pacote, Servico } from "@barbearia-saas/shared";
+import {
+  AgendamentoLoteCriado,
+  AssinaturaPacoteCliente,
+  AVISO_NAO_COMPARECIMENTO,
+  centavosParaReais,
+  MetodoPagamento,
+  Pacote,
+  Servico,
+  StatusAssinaturaPacote,
+} from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -30,6 +39,11 @@ function duracaoDoPacote(pacote: Pacote): number {
   return pacote.servicos.reduce((total, ps) => total + ps.servico.duracaoMinutos, 0) || 30;
 }
 
+// "PACOTE" é uma opção a mais além dos métodos de pagamento avulso de
+// verdade — quando escolhida, nenhum Pagamento é criado (ver criarLote no
+// backend); é só a cota da assinatura mensal sendo usada.
+type FormaPagamento = MetodoPagamento | "PACOTE";
+
 export function BookingScreen({ route, navigation }: Props) {
   const { barbeariaId } = route.params;
   const [servicos, setServicos] = useState<Servico[]>([]);
@@ -51,7 +65,22 @@ export function BookingScreen({ route, navigation }: Props) {
   const [carregandoHorarios, setCarregandoHorarios] = useState(false);
   const [horarioSelecionado, setHorarioSelecionado] = useState<string | undefined>();
 
+  const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>(MetodoPagamento.PIX);
   const [enviando, setEnviando] = useState(false);
+
+  // Assinaturas ATIVAS do cliente nessa barbearia — usadas pra oferecer "usar
+  // meu pacote mensal" quando ela cobrir os serviços/dia/cota escolhidos (a
+  // conferência de verdade é sempre no servidor, isso aqui só decide se
+  // mostra a opção).
+  const [assinaturasAtivas, setAssinaturasAtivas] = useState<AssinaturaPacoteCliente[]>([]);
+  useEffect(() => {
+    api
+      .get<AssinaturaPacoteCliente[]>("/pacotes-mensais/minhas-assinaturas")
+      .then(({ data }) =>
+        setAssinaturasAtivas(data.filter((a) => a.barbeariaId === barbeariaId && a.status === StatusAssinaturaPacote.ATIVA)),
+      )
+      .catch(() => setAssinaturasAtivas([]));
+  }, [barbeariaId]);
 
   // Carrega o catálogo de serviços e pacotes e já marca o que veio por
   // parâmetro (quando o cliente escolheu tudo direto na Home).
@@ -107,6 +136,33 @@ export function BookingScreen({ route, navigation }: Props) {
   const totalItens = itensSelecionados.reduce((total, item) => total + item.quantidade, 0);
   const duracaoTotalMinutos = itensSelecionados.reduce((total, item) => total + item.duracaoMinutos * item.quantidade, 0);
   const precoTotalCentavos = itensSelecionados.reduce((total, item) => total + item.precoCentavos * item.quantidade, 0);
+
+  // Existe uma assinatura de pacote mensal que cobre exatamente o que foi
+  // escolhido? Só serviços avulsos contam (nada de Pacote-combo), todos
+  // precisam estar incluídos no MESMO pacote, no dia da semana permitido e
+  // com cota sobrando — o servidor confere tudo de novo antes de confirmar.
+  const assinaturaElegivel = useMemo(() => {
+    if (itensSelecionados.length === 0 || !diaSelecionado) return null;
+    if (itensSelecionados.some((item) => item.tipo !== "servico")) return null;
+    const diaSemana = new Date(`${diaSelecionado}T00:00:00`).getDay();
+    const servicoIds = itensSelecionados.map((item) => item.id);
+    return (
+      assinaturasAtivas.find((assinatura) => {
+        const pacote = assinatura.pacoteMensal;
+        if (!pacote) return false;
+        const idsIncluidos = new Set(pacote.servicos.map((ps) => ps.servicoId));
+        if (!servicoIds.every((id) => idsIncluidos.has(id))) return false;
+        if (!pacote.diasSemanaPermitidos.includes(diaSemana)) return false;
+        return (assinatura.usosNaSemana ?? 0) + totalItens <= pacote.vezesPorSemana;
+      }) ?? null
+    );
+  }, [itensSelecionados, diaSelecionado, totalItens, assinaturasAtivas]);
+
+  // Se a seleção mudou e o pacote deixou de cobrir, volta pro Pix (não deixa
+  // a opção "Pacote mensal" marcada escondida sem aparecer mais na lista).
+  useEffect(() => {
+    if (formaPagamento === "PACOTE" && !assinaturaElegivel) setFormaPagamento(MetodoPagamento.PIX);
+  }, [assinaturaElegivel, formaPagamento]);
 
   function alterarQuantidade(servicoId: string, delta: number) {
     setQuantidades((atual) => ({ ...atual, [servicoId]: Math.max(0, (atual[servicoId] ?? 0) + delta) }));
@@ -184,19 +240,38 @@ export function BookingScreen({ route, navigation }: Props) {
 
   async function confirmar() {
     if (!diaSelecionado || !horarioSelecionado || itensSelecionados.length === 0) return;
+    // Offset fixo do horário de Brasília: evita depender do fuso configurado
+    // no aparelho do cliente pra não agendar num horário errado.
+    const inicio = `${diaSelecionado}T${horarioSelecionado}:00-03:00`;
+    const itens = itensSelecionados.flatMap((item) =>
+      Array.from({ length: item.quantidade }, () =>
+        item.tipo === "servico" ? { servicoId: item.id } : { pacoteId: item.id },
+      ),
+    );
+
+    // Cartão nunca cria o agendamento direto por aqui — primeiro precisa do
+    // formulário nativo (tokeniza e cobra na hora, sem sair do app); é a
+    // CartaoScreen quem chama POST /agendamentos/lote depois de tokenizar.
+    if (formaPagamento === MetodoPagamento.CARTAO) {
+      navigation.navigate("Cartao", { barbeariaId, inicio, itens, valorCentavos: precoTotalCentavos });
+      return;
+    }
+
     setEnviando(true);
     try {
-      // Offset fixo do horário de Brasília: evita depender do fuso configurado
-      // no aparelho do cliente pra não agendar num horário errado.
-      const inicio = `${diaSelecionado}T${horarioSelecionado}:00-03:00`;
-      const itens = itensSelecionados.flatMap((item) =>
-        Array.from({ length: item.quantidade }, () =>
-          item.tipo === "servico" ? { servicoId: item.id } : { pacoteId: item.id },
-        ),
-      );
-      await api.post("/agendamentos/lote", { inicio, itens });
-      Alert.alert("Agendamento confirmado!", "Você pode acompanhar em Meus agendamentos.");
-      navigation.navigate("Home");
+      const usandoPacote = formaPagamento === "PACOTE" && assinaturaElegivel;
+      const { data } = await api.post<AgendamentoLoteCriado>("/agendamentos/lote", {
+        inicio,
+        itens,
+        metodoPagamento: usandoPacote ? undefined : (formaPagamento as MetodoPagamento),
+        usarAssinaturaPacoteId: usandoPacote ? assinaturaElegivel.id : undefined,
+      });
+      if (data.pagamento) {
+        navigation.replace("Pagamento", { pagamento: data.pagamento, aviso: data.aviso });
+      } else {
+        Alert.alert("Agendamento confirmado!", "Reservado usando a cota do seu pacote mensal.");
+        navigation.navigate("Home");
+      }
     } catch (e: any) {
       Alert.alert("Não foi possível agendar", e?.response?.data?.message ?? "Tente outro horário.");
     } finally {
@@ -375,7 +450,52 @@ export function BookingScreen({ route, navigation }: Props) {
                 <Text style={styles.confirmTotalValor}>{centavosParaReais(precoTotalCentavos)}</Text>
               </View>
             </Card>
-            <Button label="Confirmar agendamento" onPress={confirmar} loading={enviando} />
+
+            <Text style={styles.sectionTitle}>Forma de pagamento</Text>
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              {(
+                [
+                  { valor: MetodoPagamento.PIX as FormaPagamento, label: "Pix" },
+                  { valor: MetodoPagamento.CARTAO as FormaPagamento, label: "Cartão" },
+                  ...(assinaturaElegivel ? [{ valor: "PACOTE" as FormaPagamento, label: "Pacote mensal" }] : []),
+                ]
+              ).map((opcao) => {
+                const selecionado = formaPagamento === opcao.valor;
+                return (
+                  <Pressable key={opcao.valor} onPress={() => setFormaPagamento(opcao.valor)} style={{ flex: 1 }}>
+                    <View style={[styles.horarioChip, styles.metodoChip, selecionado && styles.horarioChipSelecionado]}>
+                      <Text style={[styles.horarioTexto, selecionado && styles.horarioTextoSelecionado]}>{opcao.label}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {formaPagamento === "PACOTE" && assinaturaElegivel && (
+              <Text style={styles.hint}>
+                Usa {totalItens} de {assinaturaElegivel.pacoteMensal!.vezesPorSemana - (assinaturaElegivel.usosNaSemana ?? 0)} usos
+                restantes essa semana no seu pacote — sem cobrança avulsa.
+              </Text>
+            )}
+
+            <Card style={styles.avisoCard}>
+              <Text style={styles.avisoTexto}>
+                {formaPagamento === "PACOTE"
+                  ? "Política de cancelamento: em caso de não comparecimento ao horário agendado sem cancelamento prévio, a vaga ainda é contada como usada na sua cota semanal do pacote."
+                  : AVISO_NAO_COMPARECIMENTO}
+              </Text>
+            </Card>
+
+            <Button
+              label={
+                formaPagamento === "PACOTE"
+                  ? "Confirmar agendamento"
+                  : formaPagamento === MetodoPagamento.CARTAO
+                    ? "Continuar para pagamento"
+                    : "Confirmar e pagar"
+              }
+              onPress={confirmar}
+              loading={enviando}
+            />
           </>
         )}
       </ScrollView>
@@ -457,6 +577,9 @@ const styles = StyleSheet.create({
   horarioChipSelecionado: { backgroundColor: colors.accent, borderColor: colors.accent },
   horarioTexto: { fontSize: 13, fontWeight: "700", color: colors.ink },
   horarioTextoSelecionado: { color: colors.accentInk },
+  metodoChip: { alignItems: "center" },
+  avisoCard: { backgroundColor: colors.dangerSoft },
+  avisoTexto: { fontSize: 11, color: colors.danger, lineHeight: 16 },
   confirmLinha: { flexDirection: "row", justifyContent: "space-between" },
   confirmServico: { fontSize: 13, color: colors.ink, fontWeight: "600" },
   divisor: { height: 1, backgroundColor: colors.border },

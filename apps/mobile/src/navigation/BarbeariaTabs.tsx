@@ -2,7 +2,7 @@ import React from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { BarbeariaDashboardScreen } from "../screens/barbearia/DashboardScreen";
-import { BarbeariaAgendaScreen } from "../screens/barbearia/AgendaScreen";
+import { BarbeariaAgendaStackNavigator } from "./AgendaStack";
 import { BarbeariaFinanceiroScreen } from "../screens/barbearia/FinanceiroScreen";
 import { MaisStackNavigator } from "./MaisStack";
 import { tabBarScreenOptions } from "./tabBarOptions";
@@ -21,7 +21,7 @@ export function BarbeariaTabs() {
       />
       <Tab.Screen
         name="Agenda"
-        component={BarbeariaAgendaScreen}
+        component={BarbeariaAgendaStackNavigator}
         options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "calendar" : "calendar-outline"} size={size} color={color} /> }}
       />
       <Tab.Screen

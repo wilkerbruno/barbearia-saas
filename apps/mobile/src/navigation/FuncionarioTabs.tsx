@@ -1,7 +1,7 @@
 import React from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { FuncionarioAgendaScreen } from "../screens/funcionario/AgendaScreen";
+import { FuncionarioAgendaStackNavigator } from "./AgendaStack";
 import { FuncionarioFinanceiroScreen } from "../screens/funcionario/FinanceiroScreen";
 import { FuncionarioHorariosScreen } from "../screens/funcionario/HorariosScreen";
 import { FuncionarioPerfilScreen } from "../screens/funcionario/PerfilScreen";
@@ -15,7 +15,7 @@ export function FuncionarioTabs() {
     <Tab.Navigator screenOptions={tabBarScreenOptions}>
       <Tab.Screen
         name="Agenda"
-        component={FuncionarioAgendaScreen}
+        component={FuncionarioAgendaStackNavigator}
         options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "calendar" : "calendar-outline"} size={size} color={color} /> }}
       />
       <Tab.Screen

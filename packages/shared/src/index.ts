@@ -47,6 +47,12 @@ export interface Barbearia {
   logoUrl?: string | null;
   notaMedia: number;
   totalAvaliacoes: number;
+  // Chave PÚBLICA da conta Mercado Pago da barbearia (diferente do access
+  // token — essa é segura de expor ao app do cliente) — usada para
+  // tokenizar o cartão direto no aparelho antes de mandar pro servidor (ver
+  // CartaoScreen no app e MercadoPagoService.criarPagamentoCartao na API).
+  // null/undefined = barbearia ainda não conectou o Mercado Pago.
+  mercadoPagoPublicKey?: string | null;
   criadoEm: string;
 }
 
@@ -61,7 +67,7 @@ export interface BarbeariaProxima extends Barbearia {
 // que não tem permissão pra ler a barbearia inteira via GET /barbearias/:id).
 export type BarbeariaPublica = Pick<
   Barbearia,
-  "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes"
+  "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes" | "mercadoPagoPublicKey"
 >;
 
 // ============================= SERVIÇOS E PACOTES =============================
@@ -205,7 +211,7 @@ export interface Agendamento {
   // Agendamentos antigos (de antes dessa funcionalidade) têm isso null.
   grupoId?: string | null;
   // Preenchido quando o horário foi usado pela cota do pacote mensal do
-  // cliente em vez de pago avulso — nesse caso `pagamento` fica null.
+  // cliente em vez de pago avulso — nesse caso não existe Pagamento pra esse grupoId.
   assinaturaPacoteId?: string | null;
   // Só quando status = NAO_COMPARECEU: os 50% retidos como multa.
   valorMultaCentavos?: number | null;
@@ -216,7 +222,21 @@ export interface Agendamento {
   pacote?: Pick<Pacote, "id" | "nome" | "precoCentavos"> | null;
   funcionario?: { id: string; cargo: string; usuario: { id: string; nome: string } };
   cliente?: { id: string; nome: string; telefone?: string | null } | null;
-  pagamento?: Pagamento | null;
+}
+
+// Retorno de POST /agendamentos/lote (e POST /agendamentos, que por baixo faz
+// a mesma coisa com um item só): os agendamentos criados (PENDENTE até o
+// pagamento confirmar) e a cobrança gerada — a tela de pagamento usa
+// `pagamento` pra mostrar o QR do Pix ou abrir o checkout do cartão.
+export interface AgendamentoLoteCriado {
+  agendamentos: Agendamento[];
+  // null quando o lote inteiro foi coberto pela cota de uma assinatura de
+  // pacote mensal (ver usarAssinaturaPacoteId/CriarAgendamentoLoteInput) — aí
+  // o agendamento já nasce CONFIRMADO, sem cobrança avulsa nenhuma.
+  pagamento: Pagamento | null;
+  // Texto de aviso sobre a multa de não comparecimento — mesmo valor de
+  // AVISO_NAO_COMPARECIMENTO, devolvido pronto pra exibir na tela de pagamento.
+  aviso: string;
 }
 
 // Corpo de POST /agendamentos/lote — o cliente pode marcar vários serviços
@@ -238,6 +258,13 @@ export interface CriarAgendamentoLoteInput {
   // usarAssinaturaPacoteId pra forçar/escolher qual assinatura usar.
   metodoPagamento?: MetodoPagamento;
   usarAssinaturaPacoteId?: string;
+  // Só quando metodoPagamento = CARTAO: dados do cartão já tokenizado no
+  // próprio app (nunca o número do cartão em si) — ver CartaoScreen e
+  // MercadoPagoService.criarPagamentoCartao. O pagamento é cobrado na hora,
+  // sem sair do app nem abrir navegador.
+  cartaoToken?: string; // token de uso único gerado pelo SDK/API do Mercado Pago no aparelho
+  cartaoBin?: string; // 6 primeiros dígitos do cartão, usados pra identificar a bandeira
+  cartaoCpf?: string; // CPF do titular, exigido pelo Mercado Pago em pagamentos com cartão
 }
 
 // Corpo de POST /agendamentos/manual (lançado pela própria barbearia — ver
@@ -270,7 +297,8 @@ export type StatusPagamento = (typeof StatusPagamento)[keyof typeof StatusPagame
 
 export interface Pagamento {
   id: string;
-  agendamentoId?: string | null;
+  // Cobre todos os agendamentos desse grupo (ver comentário no schema.prisma).
+  grupoId?: string | null;
   clienteId: string;
   barbeariaId: string;
   metodo: MetodoPagamento;
@@ -280,8 +308,10 @@ export interface Pagamento {
   // Pix: dados pra exibir o QR/copia-e-cola (só quando metodo=PIX e ainda PENDENTE).
   pixQrCodeBase64?: string | null;
   pixCopiaECola?: string | null;
-  // Cartão via Checkout Pro: link pra abrir o checkout hospedado do Mercado
-  // Pago (só quando metodo=CARTAO e ainda PENDENTE).
+  // Legado: link do Checkout Pro do Mercado Pago. O pagamento com cartão
+  // agora é feito direto no app (formulário nativo + tokenização — ver
+  // CartaoScreen/MercadoPagoService.criarPagamentoCartao), então isso fica
+  // sempre null em pagamentos novos; mantido só por compatibilidade de tipo.
   checkoutUrl?: string | null;
   criadoEm: string;
 }
@@ -328,6 +358,14 @@ export interface AssinaturaPacoteCliente {
   // Quantas vezes já usou o pacote na semana corrente (ver
   // PacotesMensaisService) — usado pra mostrar "2 de 3 usos essa semana".
   usosNaSemana?: number;
+}
+
+// Retorno de POST /pacotes-mensais/:id/assinar — o cliente precisa abrir
+// `initPoint` e autorizar a cobrança recorrente com o cartão dele; a
+// assinatura só vira ATIVA de verdade quando o webhook confirmar (ver
+// WebhooksService/PacotesMensaisService).
+export interface AssinarPacoteMensalResultado {
+  initPoint: string;
 }
 
 // ============================= FINANCEIRO =============================

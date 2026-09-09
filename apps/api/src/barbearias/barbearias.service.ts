@@ -7,7 +7,10 @@ import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
 
 // Campos seguros para expor sem autenticação (busca de proximidade, tela
 // pública "sobre a barbearia" etc). Nunca inclua e-mail/telefone de usuários
-// nem dados de assinatura/faturamento aqui.
+// nem dados de assinatura/faturamento aqui. mercadoPagoPublicKey é a chave
+// PÚBLICA da conta Mercado Pago da barbearia — ao contrário do access
+// token, é seguro expor ao app do cliente (é o que o app usa pra tokenizar
+// o cartão direto no aparelho, ver CartaoScreen).
 const SELECT_PUBLICO = {
   id: true,
   nome: true,
@@ -18,6 +21,7 @@ const SELECT_PUBLICO = {
   logoUrl: true,
   notaMedia: true,
   totalAvaliacoes: true,
+  mercadoPagoPublicKey: true,
 } as const;
 
 // Tamanho máximo aceito pro arquivo de logo enviado (antes de comprimir).

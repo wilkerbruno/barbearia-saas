@@ -48,6 +48,14 @@ export interface CheckoutPreferenceCriada {
   initPoint: string;
 }
 
+export interface CartaoPagamentoCriado {
+  id: string;
+  status: string;
+  // Motivo detalhado quando recusado (ex: "cc_rejected_insufficient_amount")
+  // — ver traduzirMotivoRecusaCartao em AgendamentosService.
+  statusDetail: string | null;
+}
+
 export interface TokensOAuth {
   accessToken: string;
   refreshToken: string | null;
@@ -324,9 +332,67 @@ export class MercadoPagoService {
     };
   }
 
+  // Identifica a bandeira do cartão (payment_method_id, ex: "visa",
+  // "master") a partir do BIN (6 primeiros dígitos) — o Mercado Pago exige
+  // esse id explícito na hora de criar o pagamento (ver criarPagamentoCartao)
+  // e essa consulta só pode ser feita com o access token (não dá pra fazer
+  // pelo app com a chave pública), por isso mora aqui e não no app.
+  async identificarBandeiraCartao(bin: string, accessTokenOverride: string): Promise<{ paymentMethodId: string }> {
+    const corpo: any = await this.chamar(`/v1/payment_methods/search?bin=${encodeURIComponent(bin)}`, undefined, accessTokenOverride);
+    const resultados: any[] = Array.isArray(corpo) ? corpo : (corpo?.results ?? []);
+    const encontrado = resultados[0];
+    if (!encontrado?.id) {
+      throw new BadRequestException("Não foi possível identificar a bandeira desse cartão. Confira o número digitado.");
+    }
+    return { paymentMethodId: encontrado.id };
+  }
+
+  // Cria a cobrança com o cartão TOKENIZADO direto no app do cliente (ver
+  // CartaoScreen) — nem o app nem esse servidor chegam a ver o número do
+  // cartão em si, só o token de uso único que o próprio Mercado Pago gerou a
+  // partir dele. Sempre à vista (installments fixo em 1 — o produto não
+  // oferece parcelamento). O `payer.identification` (CPF) é exigido pelo
+  // Mercado Pago em pagamentos com cartão no Brasil.
+  async criarPagamentoCartao(
+    params: {
+      valorCentavos: number;
+      descricao: string;
+      externalReference: string;
+      token: string;
+      paymentMethodId: string;
+      payerEmail: string;
+      payerCpf: string;
+    },
+    accessTokenOverride: string,
+  ): Promise<CartaoPagamentoCriado> {
+    const corpo: any = await this.chamar(
+      "/v1/payments",
+      {
+        method: "POST",
+        headers: { "X-Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          transaction_amount: Math.round(params.valorCentavos) / 100,
+          description: params.descricao,
+          token: params.token,
+          installments: 1,
+          payment_method_id: params.paymentMethodId,
+          external_reference: params.externalReference,
+          payer: {
+            email: params.payerEmail,
+            identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
+          },
+        }),
+      },
+      accessTokenOverride,
+    );
+    return { id: String(corpo.id), status: corpo.status, statusDetail: corpo.status_detail ?? null };
+  }
+
   // Cria uma preference do Checkout Pro (página de pagamento hospedada pelo
-  // próprio Mercado Pago) pra pagamento com cartão — evita o app ou a API
-  // precisarem tocar em número de cartão. Devolve o link pra abrir.
+  // próprio Mercado Pago) — mantido só pra referência/uso futuro (ex: outro
+  // método de pagamento que precise de página hospedada); o pagamento com
+  // cartão do cliente final agora usa criarPagamentoCartao acima, direto no
+  // app, sem sair pro navegador.
   async criarPreferenceCheckout(params: {
     valorCentavos: number;
     descricao: string;

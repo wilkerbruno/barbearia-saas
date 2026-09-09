@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, FlatList, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { Avaliacao, BarbeariaPublica, Pacote, Servico } from "@barbearia-saas/shared";
+import { AssinarPacoteMensalResultado, Avaliacao, BarbeariaPublica, Pacote, PacoteMensal, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -26,12 +26,14 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
   const [barbearia, setBarbearia] = useState<BarbeariaPublica | null>(null);
   const [servicos, setServicos] = useState<Servico[]>([]);
   const [pacotes, setPacotes] = useState<Pacote[]>([]);
+  const [pacotesMensais, setPacotesMensais] = useState<PacoteMensal[]>([]);
   const [avaliacoes, setAvaliacoes] = useState<AvaliacaoComCliente[]>([]);
   const [podeAvaliar, setPodeAvaliar] = useState(false);
   const [minhaNota, setMinhaNota] = useState(0);
   const [comentario, setComentario] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [enviandoAvaliacao, setEnviandoAvaliacao] = useState(false);
+  const [assinandoId, setAssinandoId] = useState<string | null>(null);
 
   // Serviços/pacotes marcados aqui — ao tocar em "Agendar", eles vão prontos
   // pra tela seguinte, que pula direto pra escolha de dia/horário.
@@ -41,16 +43,18 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
-      const [infoRes, servicosRes, pacotesRes, avaliacoesRes, minhaRes] = await Promise.all([
+      const [infoRes, servicosRes, pacotesRes, pacotesMensaisRes, avaliacoesRes, minhaRes] = await Promise.all([
         api.get<BarbeariaPublica>(`/barbearias/${barbeariaId}/publico`),
         api.get<Servico[]>(`/barbearias/${barbeariaId}/servicos`),
         api.get<Pacote[]>(`/barbearias/${barbeariaId}/pacotes`),
+        api.get<PacoteMensal[]>(`/barbearias/${barbeariaId}/pacotes-mensais`),
         api.get<AvaliacaoComCliente[]>(`/barbearias/${barbeariaId}/avaliacoes`),
         api.get(`/barbearias/${barbeariaId}/avaliacoes/minha`).catch(() => ({ data: { avaliacao: null, podeAvaliar: false } })),
       ]);
       setBarbearia(infoRes.data);
       setServicos(servicosRes.data);
       setPacotes(pacotesRes.data);
+      setPacotesMensais(pacotesMensaisRes.data);
       setAvaliacoes(avaliacoesRes.data);
       setPodeAvaliar(!!minhaRes.data?.podeAvaliar);
       if (minhaRes.data?.avaliacao) {
@@ -94,6 +98,22 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
       ...Array.from(pacotesSelecionados).map((pacoteId) => ({ pacoteId })),
     ];
     navigation.navigate("Agendar", { barbeariaId, nome, itensPreSelecionados });
+  }
+
+  async function assinarPacoteMensal(pacote: PacoteMensal) {
+    setAssinandoId(pacote.id);
+    try {
+      const { data } = await api.post<AssinarPacoteMensalResultado>(`/pacotes-mensais/${pacote.id}/assinar`);
+      await Linking.openURL(data.initPoint);
+      Alert.alert(
+        "Autorize no Mercado Pago",
+        "Depois de autorizar a cobrança recorrente, acompanhe o status em Perfil > Meus pacotes mensais.",
+      );
+    } catch (e: any) {
+      Alert.alert("Não foi possível iniciar a assinatura", e?.response?.data?.message ?? "Tente de novo.");
+    } finally {
+      setAssinandoId(null);
+    }
   }
 
   async function enviarAvaliacao() {
@@ -193,6 +213,31 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
                     </Pressable>
                   );
                 })}
+              </View>
+            )}
+
+            {pacotesMensais.length > 0 && (
+              <View style={{ gap: spacing.sm }}>
+                <Text style={styles.sectionTitle}>Pacotes mensais</Text>
+                <Text style={styles.dica}>Assine e use os serviços incluídos várias vezes por mês, sem pagar por agendamento.</Text>
+                {pacotesMensais.map((pacote) => (
+                  <Card key={pacote.id} style={{ gap: spacing.xs }}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <Text style={styles.itemName}>{pacote.nome}</Text>
+                      <PriceTag centavos={pacote.precoCentavos} />
+                    </View>
+                    <Text style={styles.itemMeta}>
+                      Até {pacote.vezesPorSemana}x por semana · {pacote.servicos.map((ps) => ps.servico.nome).join(", ")}
+                    </Text>
+                    {pacote.descricao && <Text style={styles.itemMeta}>{pacote.descricao}</Text>}
+                    <Button
+                      label="Assinar"
+                      variant="secondary"
+                      onPress={() => assinarPacoteMensal(pacote)}
+                      loading={assinandoId === pacote.id}
+                    />
+                  </Card>
+                ))}
               </View>
             )}
 

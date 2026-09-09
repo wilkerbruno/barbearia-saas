@@ -85,7 +85,9 @@ export function BookingsScreen() {
                 ))}
               </View>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                <Text style={styles.itemTotal}>{centavosParaReais(total)}</Text>
+                <Text style={styles.itemTotal}>
+                  {visita[0].assinaturaPacoteId ? "Incluído no pacote mensal" : centavosParaReais(total)}
+                </Text>
                 {(status === StatusAgendamento.PENDENTE || status === StatusAgendamento.CONFIRMADO) && (
                   <Text style={styles.cancelar} onPress={() => cancelar(visita[0].id)}>
                     Cancelar

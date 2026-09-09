@@ -3,7 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { HomeStackNavigator } from "./HomeStack";
 import { BookingsScreen } from "../screens/cliente/BookingsScreen";
-import { ProfileScreen } from "../screens/cliente/ProfileScreen";
+import { ProfileStackNavigator } from "./ProfileStack";
 import { colors } from "../theme/tokens";
 import { tabBarScreenOptions } from "./tabBarOptions";
 
@@ -26,7 +26,7 @@ export function ClienteTabs() {
       />
       <Tab.Screen
         name="Perfil"
-        component={ProfileScreen}
+        component={ProfileStackNavigator}
         options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "person" : "person-outline"} size={size} color={color} /> }}
       />
     </Tab.Navigator>

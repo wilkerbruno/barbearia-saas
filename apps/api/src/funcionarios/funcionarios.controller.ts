@@ -36,6 +36,14 @@ export class FuncionariosController {
     return this.funcionariosService.atualizar(id, user.barbeariaId, dto);
   }
 
+  // Só o id do cadastro na equipe do funcionário logado — usado pra lançar
+  // um agendamento manual na própria agenda (ver AgendamentosController).
+  @Roles(Papel.FUNCIONARIO)
+  @Get("meu-id")
+  meuId(@CurrentUser() user: AuthUser) {
+    return this.funcionariosService.buscarMeuId(user.id);
+  }
+
   // ---------- Horário de trabalho semanal (o próprio funcionário) ----------
 
   @Roles(Papel.FUNCIONARIO)

@@ -11,6 +11,7 @@ import { colors, spacing } from "../../theme/tokens";
 interface ResumoBarbearia {
   atendimentos: number;
   faturamentoCentavos: number;
+  multasCentavos: number;
   comissoesCentavos: number;
   lucroCentavos: number;
   porFuncionario: Array<{ nome: string; atendimentos: number; faturamentoCentavos: number; comissaoCentavos: number }>;
@@ -36,6 +37,7 @@ export function BarbeariaFinanceiroScreen() {
       setResumo({
         atendimentos: data.atendimentos ?? 0,
         faturamentoCentavos: data.faturamentoCentavos ?? 0,
+        multasCentavos: data.multasCentavos ?? 0,
         comissoesCentavos: data.comissoesCentavos ?? 0,
         lucroCentavos: data.lucroCentavos ?? 0,
         porFuncionario: data.porFuncionario ?? [],
@@ -45,6 +47,7 @@ export function BarbeariaFinanceiroScreen() {
       setResumo({
         atendimentos: 0,
         faturamentoCentavos: 0,
+        multasCentavos: 0,
         comissoesCentavos: 0,
         lucroCentavos: 0,
         porFuncionario: [],
@@ -84,6 +87,13 @@ export function BarbeariaFinanceiroScreen() {
                 <PriceTag centavos={resumo.lucroCentavos} size={16} />
               </Card>
             </View>
+
+            {resumo.multasCentavos > 0 && (
+              <Card style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", backgroundColor: colors.dangerSoft }}>
+                <Text style={[styles.label, { color: colors.danger, marginBottom: 0 }]}>Multas de não comparecimento (incluídas no faturamento)</Text>
+                <PriceTag centavos={resumo.multasCentavos} size={14} />
+              </Card>
+            )}
 
             <Text style={styles.sectionTitle}>Por funcionário</Text>
             {resumo.porFuncionario.length === 0 && (

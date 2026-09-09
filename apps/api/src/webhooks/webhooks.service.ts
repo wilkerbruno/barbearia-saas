@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { StatusAgendamento, StatusPagamento } from "@barbearia-saas/shared";
+import { StatusAgendamento, StatusAssinaturaPacote, StatusPagamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
 import { AssinaturasService } from "../assinaturas/assinaturas.service";
@@ -78,12 +78,59 @@ export class WebhooksService {
       await this.tratarPagamentoAgendamento(dataId, barbeariaId);
       return;
     }
-    if (tipo === "subscription_preapproval" || tipo === "preapproval" || tipo === "subscription_authorized_payment") {
-      // Assinatura de pacote mensal (cliente pagando a barbearia todo mês) —
-      // ver PacotesMensaisService (adicionado numa etapa seguinte).
-      this.logger.warn(`Webhook de assinatura de pacote mensal (tipo=${tipo}, id=${dataId}) recebido, mas ainda não implementado.`);
+    if (tipo === "subscription_preapproval" || tipo === "preapproval") {
+      await this.tratarPreapprovalPacoteMensal(dataId, barbeariaId);
       return;
     }
+    if (tipo === "subscription_authorized_payment") {
+      await this.tratarPagamentoAutorizadoPacoteMensal(dataId, barbeariaId);
+      return;
+    }
+  }
+
+  // Autorização (ou cancelamento/pausa) da cobrança recorrente de um pacote
+  // mensal — "assinaturaPacote:<id>" no external_reference (ver
+  // PacotesMensaisService.assinar) diz qual AssinaturaPacoteCliente ativar.
+  private async tratarPreapprovalPacoteMensal(preapprovalId: string, barbeariaId: string) {
+    const token = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
+    const preapproval = await this.mercadoPago.buscarPreapproval(preapprovalId, token);
+    const [prefixo, assinaturaId] = (preapproval.externalReference ?? "").split(":");
+    if (prefixo !== "assinaturaPacote" || !assinaturaId) return;
+
+    const dados: { gatewayAssinaturaId: string; status?: StatusAssinaturaPacote; proximaCobrancaEm?: Date } = {
+      gatewayAssinaturaId: preapprovalId,
+    };
+    if (preapproval.status === "authorized") {
+      dados.status = StatusAssinaturaPacote.ATIVA;
+      if (preapproval.nextPaymentDate) dados.proximaCobrancaEm = new Date(preapproval.nextPaymentDate);
+    } else if (preapproval.status === "cancelled") {
+      dados.status = StatusAssinaturaPacote.CANCELADA;
+    } else if (preapproval.status === "paused") {
+      dados.status = StatusAssinaturaPacote.INADIMPLENTE;
+    }
+
+    await this.prisma.assinaturaPacoteCliente.update({ where: { id: assinaturaId }, data: dados }).catch((e) => {
+      this.logger.warn(`Assinatura de pacote mensal ${assinaturaId} (do external_reference da preapproval) não encontrada: ${e}`);
+    });
+  }
+
+  // Cada cobrança recorrente aprovada também dispara esse evento — usamos só
+  // como confirmação extra de que a assinatura está ativa (defensivo, caso o
+  // webhook de preapproval acima tenha se perdido) e pra tirar da
+  // inadimplência quando uma cobrança volta a passar.
+  private async tratarPagamentoAutorizadoPacoteMensal(authorizedPaymentId: string, barbeariaId: string) {
+    const token = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
+    const autorizado = await this.mercadoPago.buscarAuthorizedPayment(authorizedPaymentId, token);
+    const [prefixo, assinaturaId] = (autorizado.externalReference ?? "").split(":");
+    if (prefixo !== "assinaturaPacote" || !assinaturaId) return;
+
+    await this.prisma.assinaturaPacoteCliente
+      .update({ where: { id: assinaturaId }, data: { status: StatusAssinaturaPacote.ATIVA } })
+      .catch((e) => {
+        this.logger.warn(
+          `Assinatura de pacote mensal ${assinaturaId} (do external_reference do pagamento autorizado) não encontrada: ${e}`,
+        );
+      });
   }
 
   // "agendamento:<pagamentoId>" — ver como AgendamentosService monta o
@@ -108,9 +155,9 @@ export class WebhooksService {
       data: { status: novoStatus, gatewayPagamentoId: paymentId },
     });
 
-    if (novoStatus === StatusPagamento.APROVADO && pagamento.agendamentoId) {
+    if (novoStatus === StatusPagamento.APROVADO && pagamento.grupoId) {
       await this.prisma.agendamento.updateMany({
-        where: { id: pagamento.agendamentoId, status: StatusAgendamento.PENDENTE },
+        where: { grupoId: pagamento.grupoId, status: StatusAgendamento.PENDENTE },
         data: { status: StatusAgendamento.CONFIRMADO },
       });
     }

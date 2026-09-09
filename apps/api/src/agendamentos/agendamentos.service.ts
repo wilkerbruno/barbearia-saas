@@ -1,10 +1,21 @@
 import { randomUUID } from "crypto";
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Funcionario, Folga, HorarioTrabalho } from "@prisma/client";
-import { Papel, StatusAgendamento } from "@barbearia-saas/shared";
+import {
+  AVISO_NAO_COMPARECIMENTO,
+  MetodoPagamento,
+  OrigemAgendamento,
+  Papel,
+  StatusAgendamento,
+  StatusAssinaturaPacote,
+  StatusPagamento,
+} from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
+import { MercadoPagoService } from "../pagamentos/mercadopago.service";
 import { CreateAgendamentoDto } from "./dto/create-agendamento.dto";
 import { CreateAgendamentoLoteDto } from "./dto/create-agendamento-lote.dto";
+import { CreateAgendamentoManualDto } from "./dto/create-agendamento-manual.dto";
 import { AuthUser } from "../auth/jwt.strategy";
 
 // De quanto em quanto tempo um novo horário pode começar (ex: 09:00, 09:30,
@@ -12,7 +23,18 @@ import { AuthUser } from "../auth/jwt.strategy";
 // do HorarioTrabalho de cada funcionário, cadastrado por ele mesmo no app.
 const INTERVALO_ENTRE_INICIOS_MINUTOS = 30;
 
-const STATUS_ATIVOS = [StatusAgendamento.PENDENTE, StatusAgendamento.CONFIRMADO];
+// Um agendamento PENDENTE (pagamento ainda não confirmado) bloqueia o horário
+// como se fosse CONFIRMADO — mas só por um tempo: se o cliente abandona o
+// pagamento (fecha o app sem pagar o Pix, não conclui o checkout do cartão),
+// o horário não pode ficar preso pra sempre. Depois desse prazo, o servidor
+// simplesmente ignora esse PENDENTE ao calcular disponibilidade/conflito —
+// não precisa de um job em background pra "limpar" nada.
+const PENDENTE_EXPIRA_MINUTOS = 20;
+
+// Fração retida como multa quando o cliente não comparece (ver
+// marcarNaoCompareceu) — o resto é estornado. Mesmo valor usado no aviso
+// exibido na hora de pagar (AVISO_NAO_COMPARECIMENTO, em @barbearia-saas/shared).
+const FRACAO_MULTA_NAO_COMPARECIMENTO = 0.5;
 
 type FuncionarioComAgenda = Funcionario & { horarios: HorarioTrabalho[]; folgas: Folga[] };
 
@@ -26,36 +48,33 @@ interface ItemResolvido {
 
 @Injectable()
 export class AgendamentosService {
-  constructor(private prisma: PrismaService) {}
+  private readonly logger = new Logger(AgendamentosService.name);
 
-  async criar(clienteId: string, dto: CreateAgendamentoDto) {
-    const item = await this.resolverItem({ servicoId: dto.servicoId, pacoteId: dto.pacoteId });
+  constructor(
+    private prisma: PrismaService,
+    private config: ConfigService,
+    private mercadoPago: MercadoPagoService,
+  ) {}
 
-    const inicio = new Date(dto.inicio);
-    const fim = new Date(inicio.getTime() + item.duracaoMinutos * 60_000);
-    await this.garantirFuncionarioLivre(dto.funcionarioId, inicio, fim, item.barbeariaId);
-
-    return this.prisma.agendamento.create({
-      data: {
-        barbeariaId: item.barbeariaId,
-        clienteId,
-        funcionarioId: dto.funcionarioId,
-        servicoId: item.servicoId,
-        pacoteId: item.pacoteId,
-        inicio,
-        fim,
-        precoCentavos: item.precoCentavos,
-        status: StatusAgendamento.CONFIRMADO,
-      },
-      include: { servico: true, pacote: true, funcionario: { include: { usuario: true } } },
+  // Mantido por compatibilidade (agendamento de um serviço/pacote só) — por
+  // baixo é a mesma coisa que criarLote com um item, mesmo fluxo de pagamento.
+  criar(clienteId: string, dto: CreateAgendamentoDto) {
+    return this.criarLote(clienteId, {
+      funcionarioId: dto.funcionarioId,
+      inicio: dto.inicio,
+      itens: [{ servicoId: dto.servicoId, pacoteId: dto.pacoteId }],
+      metodoPagamento: dto.metodoPagamento,
     });
   }
 
   // O cliente marca vários serviços de uma vez (pode repetir o mesmo, ex: 2x
   // corte pra pai e filho) num único horário — cada item vira um Agendamento
-  // próprio, encadeado em sequência a partir de "inicio" e com o mesmo
-  // profissional, todos marcados com o mesmo grupoId pra serem exibidos e
-  // cancelados juntos no app.
+  // próprio (status PENDENTE até o pagamento confirmar), encadeado em
+  // sequência a partir de "inicio" e com o mesmo profissional, todos com o
+  // mesmo grupoId pra serem exibidos/cancelados/pagos juntos. Devolve os
+  // agendamentos criados + a cobrança (Pix/Cartão) que o cliente precisa
+  // pagar pra confirmar — ver AVISO_NAO_COMPARECIMENTO pro texto exibido
+  // nessa hora (a barbearia retém 50% se o cliente não comparecer).
   async criarLote(clienteId: string, dto: CreateAgendamentoLoteDto) {
     const resolvidos = await Promise.all(dto.itens.map((item) => this.resolverItem(item)));
 
@@ -72,6 +91,35 @@ export class AgendamentosService {
       ? await this.garantirFuncionarioLivre(dto.funcionarioId, inicio, fim, barbeariaId)
       : await this.escolherFuncionarioDisponivel(barbeariaId, inicio, fim);
 
+    // Antes de exigir pagamento avulso, confere se uma assinatura de pacote
+    // mensal ATIVA do cliente já cobre esse lote inteiro (mesmos serviços,
+    // dia da semana permitido, cota da semana não esgotada) — nesse caso o
+    // agendamento nasce CONFIRMADO direto, sem Pagamento nenhum (ver
+    // encontrarAssinaturaPacoteElegivel).
+    const assinaturaPacote = await this.encontrarAssinaturaPacoteElegivel(
+      clienteId,
+      barbeariaId,
+      resolvidos,
+      inicio,
+      dto.usarAssinaturaPacoteId,
+    );
+    if (assinaturaPacote) {
+      return this.criarComAssinaturaPacote(clienteId, barbeariaId, funcionarioId, resolvidos, inicio, assinaturaPacote.id);
+    }
+
+    // Confere ANTES de criar qualquer coisa que a barbearia tem como receber
+    // — evita reservar o horário só pra descobrir depois que não dá pra cobrar.
+    const tokenBarbearia = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
+
+    const [cliente, barbearia] = await Promise.all([
+      this.prisma.usuario.findUnique({ where: { id: clienteId } }),
+      this.prisma.barbearia.findUnique({ where: { id: barbeariaId } }),
+    ]);
+    if (!cliente) throw new NotFoundException("Cliente não encontrado.");
+
+    const metodoPagamento = dto.metodoPagamento ?? MetodoPagamento.PIX;
+    const valorTotalCentavos = resolvidos.reduce((total, r) => total + r.precoCentavos, 0);
+
     const grupoId = randomUUID();
     let cursor = inicio;
     const dadosParaCriar = resolvidos.map((item) => {
@@ -87,18 +135,370 @@ export class AgendamentosService {
         inicio: inicioItem,
         fim: fimItem,
         precoCentavos: item.precoCentavos,
-        status: StatusAgendamento.CONFIRMADO,
+        status: StatusAgendamento.PENDENTE,
+        origem: OrigemAgendamento.CLIENTE_APP,
         grupoId,
       };
     });
 
     await this.prisma.$transaction(dadosParaCriar.map((data) => this.prisma.agendamento.create({ data })));
+    const pagamento = await this.prisma.pagamento.create({
+      data: { grupoId, clienteId, barbeariaId, metodo: metodoPagamento, valorCentavos: valorTotalCentavos },
+    });
 
-    return this.prisma.agendamento.findMany({
+    let motivoRecusaCartao: string | null = null;
+    try {
+      if (metodoPagamento === MetodoPagamento.PIX) {
+        const pix = await this.mercadoPago.criarPagamentoPix(
+          {
+            valorCentavos: valorTotalCentavos,
+            descricao: `Agendamento - ${barbearia?.nome ?? "Barbearia"}`,
+            externalReference: `agendamento:${pagamento.id}`,
+            payerEmail: cliente.email,
+          },
+          tokenBarbearia,
+        );
+        const aprovadoNaHora = pix.status === "approved";
+        await this.prisma.pagamento.update({
+          where: { id: pagamento.id },
+          data: {
+            gatewayPagamentoId: pix.id,
+            pixQrCodeBase64: pix.qrCodeBase64,
+            pixCopiaECola: pix.qrCode,
+            status: aprovadoNaHora ? StatusPagamento.APROVADO : StatusPagamento.PENDENTE,
+          },
+        });
+        if (aprovadoNaHora) {
+          await this.prisma.agendamento.updateMany({ where: { grupoId }, data: { status: StatusAgendamento.CONFIRMADO } });
+        }
+      } else {
+        // Cartão: formulário nativo no app tokenizou o cartão (dto.cartaoToken)
+        // e o cliente nunca sai do app — cobra na hora, sem checkout hospedado.
+        if (!dto.cartaoToken || !dto.cartaoBin || !dto.cartaoCpf) {
+          throw new BadRequestException("Dados do cartão incompletos.");
+        }
+        const { paymentMethodId } = await this.mercadoPago.identificarBandeiraCartao(dto.cartaoBin, tokenBarbearia);
+        const cobranca = await this.mercadoPago.criarPagamentoCartao(
+          {
+            valorCentavos: valorTotalCentavos,
+            descricao: `Agendamento - ${barbearia?.nome ?? "Barbearia"}`,
+            externalReference: `agendamento:${pagamento.id}`,
+            token: dto.cartaoToken,
+            paymentMethodId,
+            payerEmail: cliente.email,
+            payerCpf: dto.cartaoCpf,
+          },
+          tokenBarbearia,
+        );
+        const aprovadoNaHora = cobranca.status === "approved";
+        const recusado = cobranca.status === "rejected";
+        await this.prisma.pagamento.update({
+          where: { id: pagamento.id },
+          data: {
+            gatewayPagamentoId: cobranca.id,
+            status: aprovadoNaHora ? StatusPagamento.APROVADO : recusado ? StatusPagamento.RECUSADO : StatusPagamento.PENDENTE,
+          },
+        });
+        if (aprovadoNaHora) {
+          await this.prisma.agendamento.updateMany({ where: { grupoId }, data: { status: StatusAgendamento.CONFIRMADO } });
+        } else if (recusado) {
+          // Recusa da operadora não é uma falha técnica (não deve virar o
+          // erro genérico do catch abaixo) — libera o horário e devolve pro
+          // cliente um motivo específico pra ele tentar outro cartão.
+          await this.prisma.agendamento.updateMany({ where: { grupoId }, data: { status: StatusAgendamento.CANCELADO } });
+          motivoRecusaCartao = traduzirMotivoRecusaCartao(cobranca.statusDetail);
+        }
+      }
+    } catch (e) {
+      // Não deixa a reserva/pagamento órfãos travando o horário pra sempre —
+      // desfaz os dois e devolve um erro claro pro cliente tentar de novo.
+      this.logger.error(`Falha ao gerar cobrança pro agendamento (grupo ${grupoId}): ${e}`);
+      await this.prisma.agendamento.updateMany({ where: { grupoId }, data: { status: StatusAgendamento.CANCELADO } });
+      await this.prisma.pagamento.update({ where: { id: pagamento.id }, data: { status: StatusPagamento.RECUSADO } });
+      throw new BadRequestException("Não foi possível gerar a cobrança agora. Tente novamente em instantes.");
+    }
+
+    if (motivoRecusaCartao) {
+      throw new BadRequestException(motivoRecusaCartao);
+    }
+
+    const [agendamentos, pagamentoFinal] = await Promise.all([
+      this.prisma.agendamento.findMany({
+        where: { grupoId },
+        include: { servico: true, pacote: true, funcionario: { include: { usuario: true } } },
+        orderBy: { inicio: "asc" },
+      }),
+      this.prisma.pagamento.findUniqueOrThrow({ where: { id: pagamento.id } }),
+    ]);
+
+    return { agendamentos, pagamento: this.mapearPagamento(pagamentoFinal), aviso: AVISO_NAO_COMPARECIMENTO };
+  }
+
+  // Procura uma AssinaturaPacoteCliente ATIVA do cliente (nessa barbearia)
+  // que cubra o lote inteiro: só serviços avulsos (nada de Pacote — combo já
+  // tem preço/composição própria), todos incluídos no mesmo pacote mensal, no
+  // dia da semana permitido e com cota sobrando pra todos os itens do lote.
+  // Se `usarAssinaturaPacoteId` foi informado (o cliente escolheu usar o
+  // pacote de propósito), qualquer motivo de não cobrir vira erro claro em
+  // vez de cair silenciosamente pro pagamento avulso.
+  private async encontrarAssinaturaPacoteElegivel(
+    clienteId: string,
+    barbeariaId: string,
+    resolvidos: ItemResolvido[],
+    inicio: Date,
+    usarAssinaturaPacoteId?: string,
+  ) {
+    if (resolvidos.some((r) => !r.servicoId)) {
+      if (usarAssinaturaPacoteId) {
+        throw new BadRequestException("Pacotes de serviço avulso não podem ser pagos com a cota de um pacote mensal.");
+      }
+      return null;
+    }
+
+    const candidatas = await this.prisma.assinaturaPacoteCliente.findMany({
+      where: {
+        ...(usarAssinaturaPacoteId ? { id: usarAssinaturaPacoteId } : {}),
+        clienteId,
+        barbeariaId,
+        status: StatusAssinaturaPacote.ATIVA,
+      },
+      include: { pacoteMensal: { include: { servicos: true } } },
+    });
+    if (usarAssinaturaPacoteId && candidatas.length === 0) {
+      throw new BadRequestException("Assinatura de pacote mensal não encontrada ou não está ativa.");
+    }
+
+    const diaSemana = inicio.getDay();
+    const servicoIds = resolvidos.map((r) => r.servicoId!);
+
+    for (const candidata of candidatas) {
+      const idsIncluidos = new Set(candidata.pacoteMensal.servicos.map((s) => s.servicoId));
+      if (!servicoIds.every((id) => idsIncluidos.has(id))) {
+        if (usarAssinaturaPacoteId) throw new BadRequestException("Essa assinatura não cobre um ou mais dos serviços escolhidos.");
+        continue;
+      }
+
+      const diasPermitidos = (candidata.pacoteMensal.diasSemanaPermitidos as number[]) ?? [];
+      if (!diasPermitidos.includes(diaSemana)) {
+        if (usarAssinaturaPacoteId) throw new BadRequestException("Seu pacote mensal não permite agendar nesse dia da semana.");
+        continue;
+      }
+
+      const usos = await this.usosDaAssinaturaNaSemana(candidata.id, inicio);
+      if (usos + resolvidos.length > candidata.pacoteMensal.vezesPorSemana) {
+        if (usarAssinaturaPacoteId) throw new BadRequestException("Cota semanal do seu pacote mensal esgotada.");
+        continue;
+      }
+
+      return candidata;
+    }
+    return null;
+  }
+
+  // Mesma definição de semana (segunda 00:00 até o próximo domingo) usada em
+  // PacotesMensaisService.usosNaSemana — duplicado de propósito pra não criar
+  // um ciclo entre os dois módulos por causa de um helper de 6 linhas.
+  private usosDaAssinaturaNaSemana(assinaturaId: string, dataReferencia: Date) {
+    const diaSemana = dataReferencia.getDay();
+    const diasDesdeSegunda = (diaSemana + 6) % 7;
+    const inicioSemana = new Date(dataReferencia);
+    inicioSemana.setHours(0, 0, 0, 0);
+    inicioSemana.setDate(inicioSemana.getDate() - diasDesdeSegunda);
+    const fimSemana = new Date(inicioSemana);
+    fimSemana.setDate(fimSemana.getDate() + 7);
+
+    return this.prisma.agendamento.count({
+      where: {
+        assinaturaPacoteId: assinaturaId,
+        status: { in: [StatusAgendamento.CONFIRMADO, StatusAgendamento.CONCLUIDO, StatusAgendamento.NAO_COMPARECEU] },
+        inicio: { gte: inicioSemana, lt: fimSemana },
+      },
+    });
+  }
+
+  // Cria o lote inteiro já CONFIRMADO, usando a cota da assinatura — sem
+  // Pagamento nenhum (o cliente já paga a mensalidade à parte, ver
+  // PacotesMensaisService.assinar).
+  private async criarComAssinaturaPacote(
+    clienteId: string,
+    barbeariaId: string,
+    funcionarioId: string,
+    resolvidos: ItemResolvido[],
+    inicio: Date,
+    assinaturaPacoteId: string,
+  ) {
+    const grupoId = randomUUID();
+    let cursor = inicio;
+    const dadosParaCriar = resolvidos.map((item) => {
+      const inicioItem = cursor;
+      const fimItem = new Date(inicioItem.getTime() + item.duracaoMinutos * 60_000);
+      cursor = fimItem;
+      return {
+        barbeariaId,
+        clienteId,
+        funcionarioId,
+        servicoId: item.servicoId,
+        inicio: inicioItem,
+        fim: fimItem,
+        precoCentavos: item.precoCentavos,
+        status: StatusAgendamento.CONFIRMADO,
+        origem: OrigemAgendamento.CLIENTE_APP,
+        assinaturaPacoteId,
+        grupoId,
+      };
+    });
+
+    await this.prisma.$transaction(dadosParaCriar.map((data) => this.prisma.agendamento.create({ data })));
+    const agendamentos = await this.prisma.agendamento.findMany({
       where: { grupoId },
       include: { servico: true, pacote: true, funcionario: { include: { usuario: true } } },
       orderBy: { inicio: "asc" },
     });
+
+    return { agendamentos, pagamento: null, aviso: AVISO_NAO_COMPARECIMENTO };
+  }
+
+  // A própria barbearia lança um agendamento na agenda — cliente avulso (sem
+  // conta, só nome/telefone) ou um cliente já cadastrado no app. Cai direto
+  // como CONFIRMADO, sem PENDENTE/pagamento pelo app (quem cobra, se cobrar,
+  // é a própria barbearia por fora — ex: dinheiro/maquininha na hora).
+  // Funcionário só pode lançar na PRÓPRIA agenda; o dono da barbearia pode
+  // lançar na de qualquer funcionário da casa.
+  async criarManual(user: AuthUser, dto: CreateAgendamentoManualDto) {
+    if (!dto.clienteId && !dto.clienteAvulsoNome) {
+      throw new BadRequestException("Informe o cliente cadastrado ou ao menos o nome do cliente avulso.");
+    }
+
+    let barbeariaId: string;
+    if (user.papel === Papel.BARBEARIA_ADMIN) {
+      if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+      barbeariaId = user.barbeariaId;
+    } else if (user.papel === Papel.FUNCIONARIO) {
+      const funcionario = await this.prisma.funcionario.findUnique({ where: { usuarioId: user.id } });
+      if (!funcionario) throw new NotFoundException("Cadastro de funcionário não encontrado para este usuário.");
+      if (funcionario.id !== dto.funcionarioId) {
+        throw new ForbiddenException("Você só pode lançar agendamentos na sua própria agenda.");
+      }
+      barbeariaId = funcionario.barbeariaId;
+    } else {
+      throw new ForbiddenException("Sem permissão para lançar agendamentos manualmente.");
+    }
+
+    const resolvidos = await Promise.all(dto.itens.map((item) => this.resolverItem(item)));
+    if (resolvidos.some((r) => r.barbeariaId !== barbeariaId)) {
+      throw new BadRequestException("Todos os serviços do agendamento precisam ser da mesma barbearia.");
+    }
+
+    const duracaoTotalMinutos = resolvidos.reduce((total, r) => total + r.duracaoMinutos, 0);
+    const inicio = new Date(dto.inicio);
+    const fim = new Date(inicio.getTime() + duracaoTotalMinutos * 60_000);
+    await this.garantirFuncionarioLivre(dto.funcionarioId, inicio, fim, barbeariaId);
+
+    if (dto.clienteId) {
+      const cliente = await this.prisma.usuario.findUnique({ where: { id: dto.clienteId } });
+      if (!cliente) throw new NotFoundException("Cliente não encontrado.");
+    }
+
+    // Só usa grupoId quando há mais de um serviço (agrupa pra
+    // cancelar/concluir juntos) — um item só nem precisa.
+    const grupoId = resolvidos.length > 1 ? randomUUID() : undefined;
+    let cursor = inicio;
+    const dadosParaCriar = resolvidos.map((item) => {
+      const inicioItem = cursor;
+      const fimItem = new Date(inicioItem.getTime() + item.duracaoMinutos * 60_000);
+      cursor = fimItem;
+      return {
+        barbeariaId,
+        funcionarioId: dto.funcionarioId,
+        clienteId: dto.clienteId,
+        clienteAvulsoNome: dto.clienteId ? undefined : dto.clienteAvulsoNome,
+        clienteAvulsoTelefone: dto.clienteId ? undefined : dto.clienteAvulsoTelefone,
+        servicoId: item.servicoId,
+        pacoteId: item.pacoteId,
+        inicio: inicioItem,
+        fim: fimItem,
+        precoCentavos: item.precoCentavos,
+        status: StatusAgendamento.CONFIRMADO,
+        origem: OrigemAgendamento.BARBEARIA_MANUAL,
+        grupoId,
+      };
+    });
+
+    const criados = await this.prisma.$transaction(dadosParaCriar.map((data) => this.prisma.agendamento.create({ data })));
+    return this.prisma.agendamento.findMany({
+      where: { id: { in: criados.map((c) => c.id) } },
+      include: { servico: true, pacote: true, funcionario: { include: { usuario: true } }, cliente: true },
+      orderBy: { inicio: "asc" },
+    });
+  }
+
+  // O app chama isso pra saber se o Pix/checkout já foi pago — enquanto
+  // PENDENTE, também confere ao vivo com o Mercado Pago (não depende só do
+  // webhook, que pode demorar ou estar mal configurado num ambiente novo).
+  async buscarPagamento(pagamentoId: string, clienteId: string) {
+    const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
+    if (!pagamento || pagamento.clienteId !== clienteId) throw new NotFoundException("Pagamento não encontrado.");
+
+    if (pagamento.status === StatusPagamento.PENDENTE && pagamento.gatewayPagamentoId) {
+      try {
+        const token = await this.mercadoPago.tokenDaBarbearia(pagamento.barbeariaId);
+        const atualizado = await this.sincronizarPagamentoComGateway(pagamento.id, pagamento.gatewayPagamentoId, token);
+        return this.mapearPagamento(atualizado);
+      } catch (e) {
+        this.logger.warn(`Falha ao sincronizar pagamento ${pagamentoId} ao vivo, devolvendo estado salvo: ${e}`);
+      }
+    }
+    return this.mapearPagamento(pagamento);
+  }
+
+  // Usado tanto pelo poll acima quanto pelo webhook (ver WebhooksService) —
+  // busca o status atual no Mercado Pago e atualiza Pagamento/Agendamentos.
+  private async sincronizarPagamentoComGateway(pagamentoId: string, gatewayPagamentoId: string, token: string) {
+    const pagamentoMp = await this.mercadoPago.buscarPayment(gatewayPagamentoId, token);
+    const novoStatus =
+      pagamentoMp.status === "approved"
+        ? StatusPagamento.APROVADO
+        : pagamentoMp.status === "pending" || pagamentoMp.status === "in_process" || pagamentoMp.status === "authorized"
+          ? StatusPagamento.PENDENTE
+          : StatusPagamento.RECUSADO;
+
+    const atualizado = await this.prisma.pagamento.update({ where: { id: pagamentoId }, data: { status: novoStatus } });
+    if (novoStatus === StatusPagamento.APROVADO && atualizado.grupoId) {
+      await this.prisma.agendamento.updateMany({
+        where: { grupoId: atualizado.grupoId, status: StatusAgendamento.PENDENTE },
+        data: { status: StatusAgendamento.CONFIRMADO },
+      });
+    }
+    return atualizado;
+  }
+
+  private mapearPagamento(pagamento: {
+    id: string;
+    grupoId: string | null;
+    clienteId: string;
+    barbeariaId: string;
+    metodo: string;
+    status: string;
+    valorCentavos: number;
+    valorEstornadoCentavos: number;
+    pixQrCodeBase64: string | null;
+    pixCopiaECola: string | null;
+    criadoEm: Date;
+  }, checkoutUrl?: string | null) {
+    return {
+      id: pagamento.id,
+      grupoId: pagamento.grupoId,
+      clienteId: pagamento.clienteId,
+      barbeariaId: pagamento.barbeariaId,
+      metodo: pagamento.metodo,
+      status: pagamento.status,
+      valorCentavos: pagamento.valorCentavos,
+      valorEstornadoCentavos: pagamento.valorEstornadoCentavos,
+      pixQrCodeBase64: pagamento.pixQrCodeBase64,
+      pixCopiaECola: pagamento.pixCopiaECola,
+      checkoutUrl: checkoutUrl ?? null,
+      criadoEm: pagamento.criadoEm.toISOString(),
+    };
   }
 
   // Dias (dentro do mês informado) que têm pelo menos um horário livre para a
@@ -215,17 +615,30 @@ export class AgendamentosService {
     // Se faz parte de um lote (vários serviços marcados juntos), cancela o
     // grupo inteiro — pro cliente, é "um" agendamento só.
     if (agendamento.grupoId) {
-      await this.prisma.agendamento.updateMany({
-        where: { grupoId: agendamento.grupoId, status: { not: StatusAgendamento.CANCELADO } },
-        data: { status: StatusAgendamento.CANCELADO },
-      });
+      await this.prisma.$transaction([
+        this.prisma.agendamento.updateMany({
+          where: { grupoId: agendamento.grupoId, status: { not: StatusAgendamento.CANCELADO } },
+          data: { status: StatusAgendamento.CANCELADO },
+        }),
+        // Nunca chegou a ser pago (cliente cancelou antes de pagar) — não tem
+        // o que estornar, só marca a cobrança como não vai mais acontecer.
+        // Se JÁ estava aprovado, não mexe aqui: hoje não há estorno automático
+        // por cancelamento (só por não comparecimento — ver marcarNaoCompareceu).
+        this.prisma.pagamento.updateMany({
+          where: { grupoId: agendamento.grupoId, status: StatusPagamento.PENDENTE },
+          data: { status: StatusPagamento.RECUSADO },
+        }),
+      ]);
       return this.prisma.agendamento.findMany({ where: { grupoId: agendamento.grupoId } });
     }
 
     return this.prisma.agendamento.update({ where: { id }, data: { status: StatusAgendamento.CANCELADO } });
   }
 
-  // O funcionário marca o atendimento como concluído (entra no financeiro dele/da barbearia).
+  // O funcionário marca o atendimento como concluído (entra no financeiro
+  // dele/da barbearia). Se veio do app do cliente, exige que o pagamento já
+  // esteja aprovado — evita marcar como concluído (e contar no faturamento)
+  // um horário que na verdade não foi pago ainda.
   async concluir(id: string, user: AuthUser) {
     const agendamento = await this.prisma.agendamento.findUnique({ where: { id }, include: { funcionario: true } });
     if (!agendamento) throw new NotFoundException("Agendamento não encontrado.");
@@ -235,7 +648,80 @@ export class AgendamentosService {
       (user.papel === Papel.BARBEARIA_ADMIN && agendamento.barbeariaId === user.barbeariaId);
     if (!podeConcluir) throw new ForbiddenException("Você não pode concluir este agendamento.");
 
+    if (agendamento.origem === OrigemAgendamento.CLIENTE_APP && agendamento.grupoId) {
+      const pagamento = await this.prisma.pagamento.findFirst({ where: { grupoId: agendamento.grupoId } });
+      if (pagamento && pagamento.status !== StatusPagamento.APROVADO) {
+        throw new BadRequestException("O pagamento desse agendamento ainda não foi confirmado.");
+      }
+    }
+
     return this.prisma.agendamento.update({ where: { id }, data: { status: StatusAgendamento.CONCLUIDO } });
+  }
+
+  // Funcionário/barbearia marca que o cliente não apareceu no horário — retém
+  // 50% do valor pago como multa (estornando o resto) e libera o profissional
+  // pro resto da agenda. Aplica ao GRUPO inteiro (todos os serviços marcados
+  // juntos nesse horário), já que "não comparecimento" é sobre o horário, não
+  // sobre um serviço específico dentro dele.
+  async marcarNaoCompareceu(id: string, user: AuthUser) {
+    const agendamento = await this.prisma.agendamento.findUnique({ where: { id }, include: { funcionario: true } });
+    if (!agendamento) throw new NotFoundException("Agendamento não encontrado.");
+
+    const podeMarcar =
+      (user.papel === Papel.FUNCIONARIO && agendamento.funcionario.usuarioId === user.id) ||
+      (user.papel === Papel.BARBEARIA_ADMIN && agendamento.barbeariaId === user.barbeariaId);
+    if (!podeMarcar) throw new ForbiddenException("Você não pode marcar isso nesse agendamento.");
+    if (agendamento.status !== StatusAgendamento.CONFIRMADO) {
+      throw new BadRequestException("Só é possível marcar não comparecimento em um agendamento confirmado.");
+    }
+
+    const grupoId = agendamento.grupoId ?? agendamento.id;
+    const grupo = agendamento.grupoId
+      ? await this.prisma.agendamento.findMany({ where: { grupoId: agendamento.grupoId } })
+      : [agendamento];
+
+    const pagamento = await this.prisma.pagamento.findFirst({ where: { grupoId } });
+
+    await this.prisma.$transaction(
+      grupo.map((a) =>
+        this.prisma.agendamento.update({
+          where: { id: a.id },
+          data: {
+            status: StatusAgendamento.NAO_COMPARECEU,
+            // Sem multa em dinheiro quando o horário veio da cota de um
+            // pacote mensal — não existe Pagamento avulso pra reter/estornar
+            // aqui, o cliente já paga a mensalidade à parte. A vaga da
+            // semana ainda é contada como usada (ver usosDaAssinaturaNaSemana).
+            valorMultaCentavos: a.assinaturaPacoteId ? null : Math.round(a.precoCentavos * FRACAO_MULTA_NAO_COMPARECIMENTO),
+          },
+        }),
+      ),
+    );
+
+    // Estorna 50% ao cliente (o resto fica retido com a barbearia como
+    // multa) — só se realmente foi pago pelo app. Agendamento lançado
+    // manualmente pela barbearia (sem Pagamento) não tem o que estornar.
+    if (pagamento && pagamento.status === StatusPagamento.APROVADO && pagamento.gatewayPagamentoId) {
+      const valorEstornoCentavos = pagamento.valorCentavos - Math.round(pagamento.valorCentavos * FRACAO_MULTA_NAO_COMPARECIMENTO);
+      try {
+        const token = await this.mercadoPago.tokenDaBarbearia(agendamento.barbeariaId);
+        await this.mercadoPago.estornarPagamento(pagamento.gatewayPagamentoId, token, valorEstornoCentavos);
+        await this.prisma.pagamento.update({
+          where: { id: pagamento.id },
+          data: { status: StatusPagamento.PARCIALMENTE_ESTORNADO, valorEstornadoCentavos: valorEstornoCentavos },
+        });
+      } catch (e) {
+        // O agendamento já foi marcado como não comparecido de qualquer
+        // forma (a barbearia não deve ficar travada esperando o Mercado
+        // Pago) — mas registra bem alto, porque isso precisa de atenção
+        // manual: o cliente não foi estornado.
+        this.logger.error(
+          `FALHA AO ESTORNAR multa de não comparecimento — pagamento ${pagamento.id}, agendamento ${id}: ${e}. Requer estorno manual.`,
+        );
+      }
+    }
+
+    return this.prisma.agendamento.findMany({ where: { grupoId } });
   }
 
   // ---------- helpers privados ----------
@@ -306,7 +792,7 @@ export class AgendamentosService {
     }
 
     const conflito = await this.prisma.agendamento.findFirst({
-      where: { funcionarioId, status: { in: STATUS_ATIVOS }, inicio: { lt: fim }, fim: { gt: inicio } },
+      where: { funcionarioId, ...filtroStatusAtivo(), inicio: { lt: fim }, fim: { gt: inicio } },
     });
     if (conflito) throw new BadRequestException("Esse horário acabou de ser reservado. Escolha outro.");
     return funcionarioId;
@@ -326,7 +812,7 @@ export class AgendamentosService {
       if (!dentroDoExpediente(funcionario, inicio, fim)) continue;
 
       const conflito = await this.prisma.agendamento.findFirst({
-        where: { funcionarioId: funcionario.id, status: { in: STATUS_ATIVOS }, inicio: { lt: fim }, fim: { gt: inicio } },
+        where: { funcionarioId: funcionario.id, ...filtroStatusAtivo(), inicio: { lt: fim }, fim: { gt: inicio } },
       });
       if (!conflito) return funcionario.id;
     }
@@ -337,10 +823,24 @@ export class AgendamentosService {
 
   private buscarAgendamentosNoIntervalo(funcionarioIds: string[], inicio: Date, fim: Date) {
     return this.prisma.agendamento.findMany({
-      where: { funcionarioId: { in: funcionarioIds }, status: { in: STATUS_ATIVOS }, inicio: { lt: fim }, fim: { gt: inicio } },
+      where: { funcionarioId: { in: funcionarioIds }, ...filtroStatusAtivo(), inicio: { lt: fim }, fim: { gt: inicio } },
       select: { funcionarioId: true, inicio: true, fim: true },
     });
   }
+}
+
+// CONFIRMADO sempre bloqueia o horário; PENDENTE (pagamento em andamento) só
+// bloqueia enquanto ainda está "fresco" — depois de PENDENTE_EXPIRA_MINUTOS,
+// trata como se o cliente tivesse desistido do pagamento (ver comentário na
+// constante). Evita precisar de um job em background só pra liberar slots
+// de pagamentos abandonados.
+function filtroStatusAtivo() {
+  return {
+    OR: [
+      { status: StatusAgendamento.CONFIRMADO },
+      { status: StatusAgendamento.PENDENTE, criadoEm: { gte: new Date(Date.now() - PENDENTE_EXPIRA_MINUTOS * 60_000) } },
+    ],
+  };
 }
 
 // Quebra o expediente de um dia em uma ou duas janelas (antes/depois do
@@ -432,4 +932,28 @@ function formatarHorario(data: Date): string {
   const horas = String(data.getHours()).padStart(2, "0");
   const minutos = String(data.getMinutes()).padStart(2, "0");
   return `${horas}:${minutos}`;
+}
+
+// Traduz os motivos de recusa mais comuns que o Mercado Pago devolve em
+// status_detail pra uma mensagem que faça sentido pro cliente final — o
+// código cru (ex: "cc_rejected_insufficient_amount") não diz nada pra quem
+// não é integrador. Lista não exaustiva de propósito: cobre os motivos mais
+// frequentes, com uma mensagem genérica de fallback pros demais.
+function traduzirMotivoRecusaCartao(statusDetail: string | null): string {
+  const mensagens: Record<string, string> = {
+    cc_rejected_insufficient_amount: "Cartão sem limite suficiente para esse valor.",
+    cc_rejected_bad_filled_security_code: "Código de segurança (CVV) incorreto.",
+    cc_rejected_bad_filled_date: "Data de validade incorreta.",
+    cc_rejected_bad_filled_card_number: "Número do cartão incorreto.",
+    cc_rejected_bad_filled_other: "Dados do cartão incorretos.",
+    cc_rejected_call_for_authorize: "O banco exige autorização — ligue para o emissor do cartão ou tente outro.",
+    cc_rejected_card_disabled: "Cartão desabilitado. Entre em contato com o banco ou tente outro cartão.",
+    cc_rejected_duplicated_payment: "Já existe um pagamento igual recente — aguarde alguns minutos ou tente outro cartão.",
+    cc_rejected_high_risk: "O pagamento foi recusado por segurança. Tente outro cartão.",
+    cc_rejected_max_attempts: "Número máximo de tentativas excedido. Tente outro cartão.",
+    cc_rejected_invalid_installments: "Parcelamento inválido para esse cartão.",
+    cc_rejected_other_reason: "O cartão recusou o pagamento.",
+  };
+  const mensagem = (statusDetail && mensagens[statusDetail]) || "O cartão recusou o pagamento.";
+  return `Pagamento não aprovado: ${mensagem} Tente outro cartão ou pague com Pix.`;
 }

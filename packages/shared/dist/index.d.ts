@@ -25,13 +25,14 @@ export interface Barbearia {
     logoUrl?: string | null;
     notaMedia: number;
     totalAvaliacoes: number;
+    mercadoPagoPublicKey?: string | null;
     criadoEm: string;
 }
 export interface BarbeariaProxima extends Barbearia {
     distanciaKm: number;
     jaAgendou: boolean;
 }
-export type BarbeariaPublica = Pick<Barbearia, "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes">;
+export type BarbeariaPublica = Pick<Barbearia, "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes" | "mercadoPagoPublicKey">;
 export interface Servico {
     id: string;
     barbeariaId: string;
@@ -152,7 +153,11 @@ export interface Agendamento {
         nome: string;
         telefone?: string | null;
     } | null;
-    pagamento?: Pagamento | null;
+}
+export interface AgendamentoLoteCriado {
+    agendamentos: Agendamento[];
+    pagamento: Pagamento | null;
+    aviso: string;
 }
 export interface ItemAgendamentoLote {
     servicoId?: string;
@@ -164,6 +169,9 @@ export interface CriarAgendamentoLoteInput {
     itens: ItemAgendamentoLote[];
     metodoPagamento?: MetodoPagamento;
     usarAssinaturaPacoteId?: string;
+    cartaoToken?: string;
+    cartaoBin?: string;
+    cartaoCpf?: string;
 }
 export interface CriarAgendamentoManualInput {
     funcionarioId: string;
@@ -188,7 +196,7 @@ export declare const StatusPagamento: {
 export type StatusPagamento = (typeof StatusPagamento)[keyof typeof StatusPagamento];
 export interface Pagamento {
     id: string;
-    agendamentoId?: string | null;
+    grupoId?: string | null;
     clienteId: string;
     barbeariaId: string;
     metodo: MetodoPagamento;
@@ -232,6 +240,9 @@ export interface AssinaturaPacoteCliente {
     proximaCobrancaEm?: string | null;
     pacoteMensal?: PacoteMensal;
     usosNaSemana?: number;
+}
+export interface AssinarPacoteMensalResultado {
+    initPoint: string;
 }
 export interface ResumoFinanceiro {
     faturamentoCentavos: number;

@@ -3,6 +3,7 @@ import { Papel } from "@barbearia-saas/shared";
 import { AgendamentosService } from "./agendamentos.service";
 import { CreateAgendamentoDto } from "./dto/create-agendamento.dto";
 import { CreateAgendamentoLoteDto } from "./dto/create-agendamento-lote.dto";
+import { CreateAgendamentoManualDto } from "./dto/create-agendamento-manual.dto";
 import { Roles } from "../common/decorators/roles.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AuthUser } from "../auth/jwt.strategy";
@@ -31,6 +32,23 @@ export class AgendamentosController {
     return this.agendamentosService.listarMeusComoCliente(user.id);
   }
 
+  // Lançamento manual pela própria barbearia/funcionário (cliente avulso ou
+  // já cadastrado) — sem cobrança pelo app. Ver AgendamentosService.criarManual.
+  @Roles(Papel.FUNCIONARIO, Papel.BARBEARIA_ADMIN)
+  @Post("manual")
+  criarManual(@Body() dto: CreateAgendamentoManualDto, @CurrentUser() user: AuthUser) {
+    return this.agendamentosService.criarManual(user, dto);
+  }
+
+  // Status do pagamento (Pix/Cartão) de um agendamento recém-criado — a tela
+  // de pagamento faz polling nisso enquanto espera confirmar. Precisa vir
+  // ANTES de ":id/..." pra "pagamentos" não ser confundido com um id.
+  @Roles(Papel.CLIENTE)
+  @Get("pagamentos/:id")
+  buscarPagamento(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.agendamentosService.buscarPagamento(id, user.id);
+  }
+
   // Agenda do próprio funcionário logado. ?data=2026-08-31 filtra o dia inteiro.
   @Roles(Papel.FUNCIONARIO)
   @Get("minha-agenda")
@@ -56,6 +74,14 @@ export class AgendamentosController {
   @Patch(":id/concluir")
   concluir(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.agendamentosService.concluir(id, user);
+  }
+
+  // Funcionário/dono marca que o cliente não apareceu — retém 50% do valor
+  // pago (estorna o resto). Ver AgendamentosService.marcarNaoCompareceu.
+  @Roles(Papel.FUNCIONARIO, Papel.BARBEARIA_ADMIN)
+  @Patch(":id/nao-compareceu")
+  marcarNaoCompareceu(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.agendamentosService.marcarNaoCompareceu(id, user);
   }
 
   private parseIntervaloDia(data?: string): { inicio?: Date; fim?: Date } {

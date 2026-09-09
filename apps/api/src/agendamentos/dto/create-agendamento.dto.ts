@@ -1,6 +1,9 @@
-import { IsDateString, IsOptional, IsString, ValidateIf } from "class-validator";
+import { IsDateString, IsIn, IsOptional, IsString, ValidateIf } from "class-validator";
+import { MetodoPagamento } from "@barbearia-saas/shared";
 
-// O cliente escolhe OU um serviço avulso OU um pacote — nunca os dois.
+// O cliente escolhe OU um serviço avulso OU um pacote — nunca os dois. Por
+// baixo, isso vira uma chamada a criarLote com um item só (ver
+// AgendamentosService.criar) — mesmo fluxo de pagamento do lote.
 export class CreateAgendamentoDto {
   @IsString()
   funcionarioId: string;
@@ -15,4 +18,8 @@ export class CreateAgendamentoDto {
 
   @IsDateString()
   inicio: string;
+
+  @IsOptional()
+  @IsIn([MetodoPagamento.PIX, MetodoPagamento.CARTAO])
+  metodoPagamento?: MetodoPagamento;
 }

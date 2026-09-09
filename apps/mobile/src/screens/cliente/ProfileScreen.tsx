@@ -1,21 +1,33 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
+import { Card } from "../../components/Card";
 import { colors, spacing } from "../../theme/tokens";
+import { ProfileStackParamList } from "../../navigation/ProfileStack";
 
-export function ProfileScreen() {
+type Props = NativeStackScreenProps<ProfileStackParamList, "Perfil">;
+
+export function ProfileScreen({ navigation }: Props) {
   const usuario = useAuthStore((s) => s.usuario);
   const logout = useAuthStore((s) => s.logout);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.content}>
-        <View>
-          <Text style={styles.title}>Perfil</Text>
-          <Text style={styles.name}>{usuario?.nome}</Text>
-          <Text style={styles.email}>{usuario?.email}</Text>
+        <View style={{ gap: spacing.lg }}>
+          <View>
+            <Text style={styles.title}>Perfil</Text>
+            <Text style={styles.name}>{usuario?.nome}</Text>
+            <Text style={styles.email}>{usuario?.email}</Text>
+          </View>
+          <Card style={{ padding: 0, overflow: "hidden" }}>
+            <Text style={styles.item} onPress={() => navigation.navigate("MeusPacotes")}>
+              Meus pacotes mensais
+            </Text>
+          </Card>
         </View>
         <Button label="Sair da conta" variant="secondary" onPress={logout} />
       </View>
@@ -29,4 +41,5 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: "800", color: colors.ink, marginBottom: spacing.lg },
   name: { fontSize: 16, fontWeight: "700", color: colors.ink },
   email: { fontSize: 13, color: colors.inkMuted, marginTop: 2 },
+  item: { padding: spacing.lg, fontSize: 14, fontWeight: "600", color: colors.ink },
 });
