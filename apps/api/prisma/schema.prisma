@@ -290,10 +290,6 @@ model Agendamento {
   assinaturaPacoteId String?
   assinaturaPacote   AssinaturaPacoteCliente? @relation(fields: [assinaturaPacoteId], references: [id])
 
-  // Cobrança avulsa deste agendamento (Pix/Cartão), quando não veio de um
-  // pacote mensal nem foi lançado manualmente pela barbearia.
-  pagamento Pagamento?
-
   // Preenchido só quando status = NAO_COMPARECEU: os 50% retidos como multa
   // (o resto é estornado ao cliente — ver AgendamentosService.marcarNaoCompareceu).
   // Contabilizado pelo Financeiro junto com os CONCLUIDO.
@@ -314,8 +310,13 @@ model Agendamento {
 // pacote mensal usam AssinaturaPacoteCliente/preapproval, não este model.
 model Pagamento {
   id            String   @id @default(uuid())
-  agendamentoId String?  @unique
-  agendamento   Agendamento? @relation(fields: [agendamentoId], references: [id])
+  // Uma cobrança cobre TODOS os agendamentos de um mesmo lote (ex: corte +
+  // barba marcados juntos) — por isso a ligação é pelo grupoId compartilhado
+  // (ver Agendamento.grupoId), consultado na aplicação (não como relação do
+  // Prisma, já que grupoId não é único por Pagamento). Todo agendamento vindo
+  // do cliente (origem=CLIENTE_APP) sempre tem um grupoId, mesmo quando é um
+  // item só (ver AgendamentosService.criarLote).
+  grupoId       String?
   clienteId     String
   cliente       Usuario  @relation(fields: [clienteId], references: [id])
   barbeariaId   String
@@ -337,6 +338,7 @@ model Pagamento {
   @@index([clienteId])
   @@index([barbeariaId])
   @@index([gatewayPagamentoId])
+  @@index([grupoId])
 }
 
 // ============================= AVALIAÇÕES (ESTRELAS) =============================
