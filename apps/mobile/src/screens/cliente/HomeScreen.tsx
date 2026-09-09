@@ -1,83 +1,74 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import React, { useCallback, useEffect, useState } from "react";
+import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import * as Location from "expo-location";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { BarbeariaPublica, Pacote, Servico } from "@barbearia-saas/shared";
+import { BarbeariaProxima } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
-import { BARBEARIA_ID } from "../../config";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
-import { PriceTag } from "../../components/PriceTag";
 import { StarRating } from "../../components/StarRating";
-import { colors, spacing } from "../../theme/tokens";
+import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Home">;
+type Estado = "carregando" | "sem-permissao" | "erro" | "pronto";
 
+// Tela inicial do app do cliente: barbearias perto dele, com busca por nome,
+// ordenadas primeiro pelas que ele já frequentou e depois pelas com melhor
+// nota (ver BarbeariasService.listarProximas) — daqui ele escolhe em qual vai
+// agendar.
 export function HomeScreen({ navigation }: Props) {
-  const [barbearia, setBarbearia] = useState<BarbeariaPublica | null>(null);
-  const [servicos, setServicos] = useState<Servico[]>([]);
-  const [pacotes, setPacotes] = useState<Pacote[]>([]);
-  const [carregando, setCarregando] = useState(true);
+  const [estado, setEstado] = useState<Estado>("carregando");
+  const [barbearias, setBarbearias] = useState<BarbeariaProxima[]>([]);
+  const [busca, setBusca] = useState("");
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
 
-  // Serviços/pacotes que o cliente já marcou aqui na Home — ao tocar em
-  // "Agendar", eles vão prontos pra tela seguinte, que pula direto pra
-  // escolha de dia/horário em vez de pedir pra escolher tudo de novo.
-  const [servicosSelecionados, setServicosSelecionados] = useState<Set<string>>(new Set());
-  const [pacotesSelecionados, setPacotesSelecionados] = useState<Set<string>>(new Set());
-
-  function alternarServico(id: string) {
-    setServicosSelecionados((atual) => {
-      const novo = new Set(atual);
-      novo.has(id) ? novo.delete(id) : novo.add(id);
-      return novo;
-    });
-  }
-
-  function alternarPacote(id: string) {
-    setPacotesSelecionados((atual) => {
-      const novo = new Set(atual);
-      novo.has(id) ? novo.delete(id) : novo.add(id);
-      return novo;
-    });
-  }
-
-  const totalSelecionado = servicosSelecionados.size + pacotesSelecionados.size;
-
-  function agendar() {
-    if (totalSelecionado === 0) {
-      // Nada marcado: manda pra tela de Agendar sem seleção prévia, onde o
-      // cliente escolhe os serviços/pacotes normalmente.
-      navigation.navigate("Agendar", undefined);
-      return;
-    }
-    const itensPreSelecionados = [
-      ...Array.from(servicosSelecionados).map((servicoId) => ({ servicoId })),
-      ...Array.from(pacotesSelecionados).map((pacoteId) => ({ pacoteId })),
-    ];
-    navigation.navigate("Agendar", { itensPreSelecionados });
-  }
-
-  useEffect(() => {
-    async function carregar() {
-      try {
-        const [infoRes, servicosRes, pacotesRes] = await Promise.all([
-          api.get<BarbeariaPublica>(`/barbearias/${BARBEARIA_ID}/publico`),
-          api.get<Servico[]>(`/barbearias/${BARBEARIA_ID}/servicos`),
-          api.get<Pacote[]>(`/barbearias/${BARBEARIA_ID}/pacotes`),
-        ]);
-        setBarbearia(infoRes.data);
-        setServicos(servicosRes.data);
-        setPacotes(pacotesRes.data);
-      } finally {
-        setCarregando(false);
+  const buscarLocalizacao = useCallback(async () => {
+    setEstado("carregando");
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        setEstado("sem-permissao");
+        return;
       }
+      const posicao = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      setCoords({ lat: posicao.coords.latitude, lng: posicao.coords.longitude });
+    } catch {
+      setEstado("erro");
     }
-    carregar();
   }, []);
 
-  if (carregando) {
+  useEffect(() => {
+    buscarLocalizacao();
+  }, [buscarLocalizacao]);
+
+  // Refaz a busca sempre que a localização é obtida ou o texto de busca muda
+  // (com um pequeno atraso pra não disparar uma chamada a cada letra digitada).
+  useEffect(() => {
+    if (!coords) return;
+    let cancelado = false;
+    const tempo = setTimeout(async () => {
+      try {
+        const { data } = await api.get<BarbeariaProxima[]>("/barbearias/proximas", {
+          params: { lat: coords.lat, lng: coords.lng, raioKm: 30, q: busca || undefined },
+        });
+        if (!cancelado) {
+          setBarbearias(data);
+          setEstado("pronto");
+        }
+      } catch {
+        if (!cancelado) setEstado("erro");
+      }
+    }, 300);
+    return () => {
+      cancelado = true;
+      clearTimeout(tempo);
+    };
+  }, [coords, busca]);
+
+  if (estado === "carregando") {
     return (
       <SafeAreaView style={styles.center}>
         <ActivityIndicator color={colors.accent} />
@@ -85,85 +76,82 @@ export function HomeScreen({ navigation }: Props) {
     );
   }
 
+  if (estado === "sem-permissao" || estado === "erro") {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.mensagem}>
+          {estado === "sem-permissao"
+            ? "Precisamos da sua localização pra mostrar as barbearias mais perto de você."
+            : "Não foi possível buscar as barbearias agora. Verifique sua internet/GPS e tente de novo."}
+        </Text>
+        <Button label="Tentar novamente" onPress={buscarLocalizacao} />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <View style={styles.header}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+          <Text style={styles.title}>Barbearias</Text>
+          <Pressable
+            onPress={() => coords && navigation.navigate("Map", { barbearias, minhaLat: coords.lat, minhaLng: coords.lng })}
+            style={styles.mapaBotao}
+            hitSlop={8}
+          >
+            <Ionicons name="map-outline" size={16} color={colors.accent} />
+            <Text style={styles.mapaBotaoTexto}>Ver no mapa</Text>
+          </Pressable>
+        </View>
+        <View style={styles.buscaWrapper}>
+          <Ionicons name="search" size={16} color={colors.inkMuted} />
+          <TextInput
+            value={busca}
+            onChangeText={setBusca}
+            placeholder="Buscar pelo nome da barbearia"
+            placeholderTextColor={colors.inkMuted}
+            style={styles.buscaInput}
+          />
+        </View>
+      </View>
+
       <FlatList
-        data={servicos}
+        data={barbearias}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
-        ListHeaderComponent={
-          <View style={{ gap: spacing.xl }}>
-            <View style={{ gap: spacing.xs }}>
-              <Text style={styles.title}>{barbearia?.nome}</Text>
-              {barbearia?.endereco && <Text style={styles.subtitle}>{barbearia.endereco}</Text>}
-              {barbearia && (
-                <StarRating value={barbearia.notaMedia} totalAvaliacoes={barbearia.totalAvaliacoes} size={14} />
-              )}
-            </View>
-
-            <Button
-              label={totalSelecionado > 0 ? `Ver horários (${totalSelecionado} selecionado${totalSelecionado === 1 ? "" : "s"})` : "Agendar horário"}
-              onPress={agendar}
-            />
-            {totalSelecionado > 0 && (
-              <Text style={styles.dica}>Toque em um serviço ou pacote pra marcar ou desmarcar.</Text>
-            )}
-
-            <Text style={styles.sectionTitle}>Serviços</Text>
-          </View>
+        ListEmptyComponent={
+          <Text style={styles.mensagem}>
+            {busca ? "Nenhuma barbearia encontrada com esse nome." : "Nenhuma barbearia cadastrada perto de você ainda."}
+          </Text>
         }
-        renderItem={({ item }) => {
-          const selecionado = servicosSelecionados.has(item.id);
-          return (
-            <Pressable onPress={() => alternarServico(item.id)}>
-              <Card
-                style={[
-                  { marginBottom: spacing.sm, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-                  selecionado && styles.cardSelecionado,
-                ]}
-              >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 }}>
-                  <Ionicons
-                    name={selecionado ? "checkmark-circle" : "ellipse-outline"}
-                    size={22}
-                    color={selecionado ? colors.accent : colors.border}
-                  />
-                  <View>
-                    <Text style={styles.itemName}>{item.nome}</Text>
-                    <Text style={styles.itemMeta}>{item.duracaoMinutos} min</Text>
-                  </View>
+        renderItem={({ item }) => (
+          <Pressable onPress={() => navigation.navigate("BarbeariaDetail", { barbeariaId: item.id, nome: item.nome })}>
+            <Card style={{ marginBottom: spacing.sm, gap: spacing.xs, flexDirection: "row" }}>
+              {item.logoUrl ? (
+                <Image source={{ uri: item.logoUrl }} style={styles.logo} />
+              ) : (
+                <View style={[styles.logo, styles.logoPlaceholder]}>
+                  <Ionicons name="cut-outline" size={22} color={colors.inkMuted} />
                 </View>
-                <PriceTag centavos={item.precoCentavos} />
-              </Card>
-            </Pressable>
-          );
-        }}
-        ListFooterComponent={
-          <View style={{ marginTop: spacing.xl, gap: spacing.sm }}>
-            <Text style={styles.sectionTitle}>Pacotes</Text>
-            {pacotes.map((pacote) => {
-              const selecionado = pacotesSelecionados.has(pacote.id);
-              return (
-                <Pressable key={pacote.id} onPress={() => alternarPacote(pacote.id)}>
-                  <Card style={[{ marginBottom: spacing.sm }, selecionado && styles.cardSelecionado]}>
-                    <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, flex: 1 }}>
-                        <Ionicons
-                          name={selecionado ? "checkmark-circle" : "ellipse-outline"}
-                          size={22}
-                          color={selecionado ? colors.accent : colors.border}
-                        />
-                        <Text style={styles.itemName}>{pacote.nome}</Text>
-                      </View>
-                      <PriceTag centavos={pacote.precoCentavos} />
-                    </View>
-                    {pacote.descricao && <Text style={[styles.itemMeta, { marginLeft: 30 }]}>{pacote.descricao}</Text>}
-                  </Card>
-                </Pressable>
-              );
-            })}
-          </View>
-        }
+              )}
+              <View style={{ flex: 1, gap: spacing.xs }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <View style={{ flex: 1, paddingRight: spacing.sm }}>
+                    <Text style={styles.nome}>{item.nome}</Text>
+                    {item.endereco && <Text style={styles.endereco}>{item.endereco}</Text>}
+                  </View>
+                  <Text style={styles.distancia}>
+                    {item.distanciaKm < 1 ? `${Math.round(item.distanciaKm * 1000)} m` : `${item.distanciaKm.toFixed(1)} km`}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                  <StarRating value={item.notaMedia} totalAvaliacoes={item.totalAvaliacoes} size={14} />
+                  {item.jaAgendou && <Text style={styles.jaAgendouTag}>Você já foi aqui</Text>}
+                </View>
+              </View>
+            </Card>
+          </Pressable>
+        )}
       />
     </SafeAreaView>
   );
@@ -171,13 +159,35 @@ export function HomeScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  center: { flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
-  list: { padding: spacing.xl },
+  center: {
+    flex: 1,
+    backgroundColor: colors.background,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+    gap: spacing.lg,
+  },
+  header: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, gap: spacing.md },
   title: { fontSize: 20, fontWeight: "800", color: colors.ink },
-  subtitle: { fontSize: 13, color: colors.inkMuted, marginTop: 2 },
-  sectionTitle: { fontSize: 15, fontWeight: "800", color: colors.ink, marginBottom: spacing.sm },
-  itemName: { fontSize: 14, fontWeight: "700", color: colors.ink },
-  itemMeta: { fontSize: 12, color: colors.inkMuted, marginTop: 2 },
-  cardSelecionado: { borderColor: colors.accent, borderWidth: 1.5, backgroundColor: colors.accentSoft },
-  dica: { fontSize: 12, color: colors.inkMuted, marginTop: -spacing.sm, textAlign: "center" },
+  mapaBotao: { flexDirection: "row", alignItems: "center", gap: 4 },
+  mapaBotaoTexto: { fontSize: 12, fontWeight: "700", color: colors.accent },
+  buscaWrapper: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+  },
+  buscaInput: { flex: 1, paddingVertical: spacing.sm, fontSize: 14, color: colors.ink },
+  list: { padding: spacing.xl },
+  mensagem: { color: colors.inkMuted, fontSize: 14, textAlign: "center" },
+  logo: { width: 56, height: 56, borderRadius: radius.md, backgroundColor: colors.surfaceAlt },
+  logoPlaceholder: { alignItems: "center", justifyContent: "center" },
+  nome: { fontSize: 15, fontWeight: "800", color: colors.ink },
+  endereco: { fontSize: 12, color: colors.inkMuted, marginTop: 2 },
+  distancia: { fontSize: 12, fontWeight: "700", color: colors.accent },
+  jaAgendouTag: { fontSize: 11, fontWeight: "700", color: colors.accent },
 });

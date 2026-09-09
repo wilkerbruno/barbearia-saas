@@ -29,6 +29,7 @@ export interface Barbearia {
 }
 export interface BarbeariaProxima extends Barbearia {
     distanciaKm: number;
+    jaAgendou: boolean;
 }
 export type BarbeariaPublica = Pick<Barbearia, "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes">;
 export interface Servico {

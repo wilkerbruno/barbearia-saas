@@ -37,17 +37,25 @@ export class BarbeariasController {
     return this.barbeariasService.listarTodas();
   }
 
-  // Público: tela "Perto de você" do app do cliente. Precisa vir ANTES de
-  // ":id" pra não ser interpretada como um id de barbearia.
-  @Public()
+  // Home do app do cliente: lista as barbearias perto dele (com busca por nome
+  // opcional), já ordenada pra colocar à frente as que ele já frequentou e,
+  // depois, as com melhor nota. Precisa vir ANTES de ":id" pra não ser
+  // interpretada como um id de barbearia.
+  @Roles(Papel.CLIENTE)
   @Get("proximas")
-  listarProximas(@Query("lat") lat: string, @Query("lng") lng: string, @Query("raioKm") raioKm?: string) {
+  listarProximas(
+    @Query("lat") lat: string,
+    @Query("lng") lng: string,
+    @Query("raioKm") raioKm: string | undefined,
+    @Query("q") q: string | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
     const latitude = Number(lat);
     const longitude = Number(lng);
     if (lat === undefined || lng === undefined || Number.isNaN(latitude) || Number.isNaN(longitude)) {
       throw new BadRequestException("Informe os parâmetros lat e lng.");
     }
-    return this.barbeariasService.listarProximas(latitude, longitude, raioKm ? Number(raioKm) : undefined);
+    return this.barbeariasService.listarProximas(latitude, longitude, raioKm ? Number(raioKm) : undefined, q, user.id);
   }
 
   // Público: dados mínimos pra Home do app do cliente (nome, endereço, estrelas).

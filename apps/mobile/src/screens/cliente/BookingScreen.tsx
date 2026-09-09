@@ -6,7 +6,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { centavosParaReais, Pacote, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
-import { BARBEARIA_ID } from "../../config";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { colors, radius, spacing } from "../../theme/tokens";
@@ -32,6 +31,7 @@ function duracaoDoPacote(pacote: Pacote): number {
 }
 
 export function BookingScreen({ route, navigation }: Props) {
+  const { barbeariaId } = route.params;
   const [servicos, setServicos] = useState<Servico[]>([]);
   const [pacotes, setPacotes] = useState<Pacote[]>([]);
   const [quantidades, setQuantidades] = useState<Record<string, number>>({});
@@ -57,8 +57,8 @@ export function BookingScreen({ route, navigation }: Props) {
   // parâmetro (quando o cliente escolheu tudo direto na Home).
   useEffect(() => {
     Promise.all([
-      api.get<Servico[]>(`/barbearias/${BARBEARIA_ID}/servicos`),
-      api.get<Pacote[]>(`/barbearias/${BARBEARIA_ID}/pacotes`),
+      api.get<Servico[]>(`/barbearias/${barbeariaId}/servicos`),
+      api.get<Pacote[]>(`/barbearias/${barbeariaId}/pacotes`),
     ]).then(([servicosRes, pacotesRes]) => {
       setServicos(servicosRes.data);
       setPacotes(pacotesRes.data);
@@ -79,7 +79,7 @@ export function BookingScreen({ route, navigation }: Props) {
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [barbeariaId]);
 
   const itensSelecionados = useMemo(() => {
     const doServicos = servicos
@@ -133,13 +133,13 @@ export function BookingScreen({ route, navigation }: Props) {
     setCarregandoDias(true);
     const mes = `${mesVisivel.ano}-${String(mesVisivel.mes).padStart(2, "0")}`;
     api
-      .get<string[]>(`/barbearias/${BARBEARIA_ID}/dias-disponiveis`, { params: { mes, duracaoMinutos: duracaoTotalMinutos } })
+      .get<string[]>(`/barbearias/${barbeariaId}/dias-disponiveis`, { params: { mes, duracaoMinutos: duracaoTotalMinutos } })
       .then(({ data }) => !cancelado && setDiasDisponiveis(data))
       .finally(() => !cancelado && setCarregandoDias(false));
     return () => {
       cancelado = true;
     };
-  }, [mesVisivel, duracaoTotalMinutos]);
+  }, [barbeariaId, mesVisivel, duracaoTotalMinutos]);
 
   // Recarrega os horários sempre que o dia escolhido ou a duração total mudam.
   useEffect(() => {
@@ -151,7 +151,7 @@ export function BookingScreen({ route, navigation }: Props) {
     setCarregandoHorarios(true);
     setHorarioSelecionado(undefined);
     api
-      .get<string[]>(`/barbearias/${BARBEARIA_ID}/horarios-disponiveis`, {
+      .get<string[]>(`/barbearias/${barbeariaId}/horarios-disponiveis`, {
         params: { data: diaSelecionado, duracaoMinutos: duracaoTotalMinutos },
       })
       .then(({ data }) => !cancelado && setHorarios(data))
@@ -159,7 +159,7 @@ export function BookingScreen({ route, navigation }: Props) {
     return () => {
       cancelado = true;
     };
-  }, [diaSelecionado, duracaoTotalMinutos]);
+  }, [barbeariaId, diaSelecionado, duracaoTotalMinutos]);
 
   const markedDates = useMemo(() => {
     const marcado: Record<string, any> = {};

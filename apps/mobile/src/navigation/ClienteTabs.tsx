@@ -2,7 +2,6 @@ import React from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { HomeStackNavigator } from "./HomeStack";
-import { NearbyStackNavigator } from "./NearbyStack";
 import { BookingsScreen } from "../screens/cliente/BookingsScreen";
 import { ProfileScreen } from "../screens/cliente/ProfileScreen";
 import { colors } from "../theme/tokens";
@@ -10,8 +9,8 @@ import { tabBarScreenOptions } from "./tabBarOptions";
 
 const Tab = createBottomTabNavigator();
 
-// Navegação do papel CLIENTE: Início (com o fluxo de agendamento embutido),
-// Perto de você (descoberta por localização), Agendamentos e Perfil.
+// Navegação do papel CLIENTE: Início (lista de barbearias perto dele, com
+// busca, já entrando no fluxo de agendamento), Agendamentos e Perfil.
 export function ClienteTabs() {
   return (
     <Tab.Navigator screenOptions={tabBarScreenOptions}>
@@ -19,11 +18,6 @@ export function ClienteTabs() {
         name="Início"
         component={HomeStackNavigator}
         options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "home" : "home-outline"} size={size} color={color} /> }}
-      />
-      <Tab.Screen
-        name="Perto de você"
-        component={NearbyStackNavigator}
-        options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "location" : "location-outline"} size={size} color={color} /> }}
       />
       <Tab.Screen
         name="Agendamentos"

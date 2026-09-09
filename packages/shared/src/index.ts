@@ -54,6 +54,7 @@ export interface Barbearia {
 // partir da localização atual do cliente (ver BarbeariasService.listarProximas).
 export interface BarbeariaProxima extends Barbearia {
   distanciaKm: number;
+  jaAgendou: boolean; // o cliente logado já teve algum agendamento nessa barbearia
 }
 
 // Retorno público de GET /barbearias/:id/publico (usado pela Home do cliente,

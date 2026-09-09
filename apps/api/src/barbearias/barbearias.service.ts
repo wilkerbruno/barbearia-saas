@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import sharp from "sharp";
+import { StatusAgendamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
 import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
@@ -97,27 +98,49 @@ export class BarbeariasService {
     });
   }
 
-  // Público: usado pela tela "Perto de você" do app do cliente. Busca todas as
-  // barbearias com localização cadastrada e calcula a distância até o ponto
-  // informado (fórmula de Haversine, em memória — sem depender de extensão
-  // geoespacial do MySQL, o que é suficiente pro volume de um SaaS ainda pequeno).
-  async listarProximas(latitude: number, longitude: number, raioKm = 15) {
+  // Home do app do cliente. Busca as barbearias com localização cadastrada
+  // dentro do raio (fórmula de Haversine, em memória — sem depender de
+  // extensão geoespacial do MySQL, suficiente pro volume de um SaaS ainda
+  // pequeno), com filtro opcional por nome, e ordena colocando à frente:
+  // 1) barbearias onde o cliente já teve algum agendamento; 2) as com melhor
+  // nota média; 3) desempate por distância.
+  async listarProximas(latitude: number, longitude: number, raioKm = 15, nome?: string, clienteId?: string) {
     if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
       throw new BadRequestException("Informe latitude e longitude válidas.");
     }
 
-    const candidatas = await this.prisma.barbearia.findMany({
-      where: { latitude: { not: null }, longitude: { not: null } },
-      select: SELECT_PUBLICO,
-    });
+    const [candidatas, agendamentosDoCliente] = await Promise.all([
+      this.prisma.barbearia.findMany({
+        where: {
+          latitude: { not: null },
+          longitude: { not: null },
+          ...(nome ? { nome: { contains: nome } } : {}),
+        },
+        select: SELECT_PUBLICO,
+      }),
+      clienteId
+        ? this.prisma.agendamento.findMany({
+            where: { clienteId },
+            select: { barbeariaId: true },
+            distinct: ["barbeariaId"],
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const idsJaAgendados = new Set(agendamentosDoCliente.map((a) => a.barbeariaId));
 
     return candidatas
       .map((barbearia) => ({
         ...barbearia,
         distanciaKm: distanciaHaversineKm(latitude, longitude, barbearia.latitude!, barbearia.longitude!),
+        jaAgendou: idsJaAgendados.has(barbearia.id),
       }))
       .filter((barbearia) => barbearia.distanciaKm <= raioKm)
-      .sort((a, b) => a.distanciaKm - b.distanciaKm);
+      .sort((a, b) => {
+        if (a.jaAgendou !== b.jaAgendou) return a.jaAgendou ? -1 : 1;
+        if (b.notaMedia !== a.notaMedia) return b.notaMedia - a.notaMedia;
+        return a.distanciaKm - b.distanciaKm;
+      });
   }
 
   // Cliente avalia (ou atualiza a própria avaliação) uma barbearia. Depois de
@@ -127,6 +150,12 @@ export class BarbeariasService {
   async avaliar(barbeariaId: string, clienteId: string, dto: CreateAvaliacaoDto) {
     const barbearia = await this.prisma.barbearia.findUnique({ where: { id: barbeariaId } });
     if (!barbearia) throw new NotFoundException("Barbearia não encontrada.");
+
+    if (!(await this.clienteJaFoiAtendido(barbeariaId, clienteId))) {
+      throw new ForbiddenException(
+        "Você só pode avaliar depois que o horário do seu atendimento nessa barbearia passar.",
+      );
+    }
 
     await this.prisma.avaliacao.upsert({
       where: { barbeariaId_clienteId: { barbeariaId, clienteId } },
@@ -159,12 +188,30 @@ export class BarbeariasService {
     });
   }
 
-  // Avaliação que o próprio cliente logado já fez (se houver) — usado pra
-  // pré-preencher as estrelas quando ele reabre a tela de avaliação.
-  buscarMinhaAvaliacao(barbeariaId: string, clienteId: string) {
-    return this.prisma.avaliacao.findUnique({
-      where: { barbeariaId_clienteId: { barbeariaId, clienteId } },
+  // Avaliação que o próprio cliente logado já fez (se houver), mais se ele já
+  // pode avaliar — usado pra pré-preencher as estrelas e pra decidir se o
+  // formulário de avaliação aparece (só depois de um atendimento concluído).
+  async buscarMinhaAvaliacao(barbeariaId: string, clienteId: string) {
+    const [avaliacao, podeAvaliar] = await Promise.all([
+      this.prisma.avaliacao.findUnique({ where: { barbeariaId_clienteId: { barbeariaId, clienteId } } }),
+      this.clienteJaFoiAtendido(barbeariaId, clienteId),
+    ]);
+    return { avaliacao, podeAvaliar };
+  }
+
+  // Um cliente só pode avaliar uma barbearia depois que o horário de algum
+  // agendamento dele lá já tiver passado (não vale cancelado, nem um horário
+  // ainda futuro) — é isso que "libera" o formulário de avaliação no app.
+  private async clienteJaFoiAtendido(barbeariaId: string, clienteId: string): Promise<boolean> {
+    const total = await this.prisma.agendamento.count({
+      where: {
+        barbeariaId,
+        clienteId,
+        fim: { lt: new Date() },
+        status: { not: StatusAgendamento.CANCELADO },
+      },
     });
+    return total > 0;
   }
 }
 
