@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import { Ionicons } from "@expo/vector-icons";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { centavosParaReais, Servico } from "@barbearia-saas/shared";
+import { centavosParaReais, Pacote, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { BARBEARIA_ID } from "../../config";
 import { Button } from "../../components/Button";
@@ -24,9 +24,23 @@ const LIMITE_DIAS_FUTUROS = 60; // até quantos dias à frente dá pra agendar
 // escolhidos) → 4) conferir o resumo (duração e valor total) e confirmar.
 // O profissional é escolhido automaticamente pelo servidor entre quem estiver
 // livre naquele horário — simplifica o fluxo pro cliente.
+// Duração de um pacote = soma da duração de cada serviço incluído nele,
+// exatamente como o servidor calcula em resolverItem() — precisa bater com
+// o back-end pra não pedir um horário que na verdade não cabe o pacote todo.
+function duracaoDoPacote(pacote: Pacote): number {
+  return pacote.servicos.reduce((total, ps) => total + ps.servico.duracaoMinutos, 0) || 30;
+}
+
 export function BookingScreen({ route, navigation }: Props) {
   const [servicos, setServicos] = useState<Servico[]>([]);
+  const [pacotes, setPacotes] = useState<Pacote[]>([]);
   const [quantidades, setQuantidades] = useState<Record<string, number>>({});
+  const [quantidadesPacotes, setQuantidadesPacotes] = useState<Record<string, number>>({});
+
+  // Quando o cliente já escolheu os itens na Home, pulamos direto pra
+  // escolha de dia/horário — a seleção só reaparece se ele tocar "Alterar itens".
+  const temPreSelecao = !!route.params?.itensPreSelecionados?.length;
+  const [mostrarSelecao, setMostrarSelecao] = useState(!temPreSelecao);
 
   const [mesVisivel, setMesVisivel] = useState({ ano: HOJE.getFullYear(), mes: HOJE.getMonth() + 1 });
   const [diasDisponiveis, setDiasDisponiveis] = useState<string[]>([]);
@@ -39,34 +53,72 @@ export function BookingScreen({ route, navigation }: Props) {
 
   const [enviando, setEnviando] = useState(false);
 
-  // Carrega o catálogo de serviços e já marca 1x o que veio por parâmetro
-  // (quando o cliente toca "Agendar horário" direto num serviço na Home).
+  // Carrega o catálogo de serviços e pacotes e já marca o que veio por
+  // parâmetro (quando o cliente escolheu tudo direto na Home).
   useEffect(() => {
-    api.get<Servico[]>(`/barbearias/${BARBEARIA_ID}/servicos`).then(({ data }) => {
-      setServicos(data);
-      if (route.params?.servicoId) {
-        setQuantidades((atual) => ({ ...atual, [route.params!.servicoId!]: 1 }));
+    Promise.all([
+      api.get<Servico[]>(`/barbearias/${BARBEARIA_ID}/servicos`),
+      api.get<Pacote[]>(`/barbearias/${BARBEARIA_ID}/pacotes`),
+    ]).then(([servicosRes, pacotesRes]) => {
+      setServicos(servicosRes.data);
+      setPacotes(pacotesRes.data);
+
+      const itens = route.params?.itensPreSelecionados;
+      if (itens?.length) {
+        const novasQuantidades: Record<string, number> = {};
+        const novasQuantidadesPacotes: Record<string, number> = {};
+        for (const item of itens) {
+          if ("servicoId" in item && item.servicoId) {
+            novasQuantidades[item.servicoId] = (novasQuantidades[item.servicoId] ?? 0) + 1;
+          } else if ("pacoteId" in item && item.pacoteId) {
+            novasQuantidadesPacotes[item.pacoteId] = (novasQuantidadesPacotes[item.pacoteId] ?? 0) + 1;
+          }
+        }
+        setQuantidades(novasQuantidades);
+        setQuantidadesPacotes(novasQuantidadesPacotes);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const itensSelecionados = useMemo(
-    () =>
-      servicos
-        .filter((s) => (quantidades[s.id] ?? 0) > 0)
-        .map((s) => ({ servico: s, quantidade: quantidades[s.id] })),
-    [servicos, quantidades],
-  );
+  const itensSelecionados = useMemo(() => {
+    const doServicos = servicos
+      .filter((s) => (quantidades[s.id] ?? 0) > 0)
+      .map((s) => ({
+        tipo: "servico" as const,
+        id: s.id,
+        nome: s.nome,
+        duracaoMinutos: s.duracaoMinutos,
+        precoCentavos: s.precoCentavos,
+        quantidade: quantidades[s.id],
+      }));
+    const doPacotes = pacotes
+      .filter((p) => (quantidadesPacotes[p.id] ?? 0) > 0)
+      .map((p) => ({
+        tipo: "pacote" as const,
+        id: p.id,
+        nome: p.nome,
+        duracaoMinutos: duracaoDoPacote(p),
+        precoCentavos: p.precoCentavos,
+        quantidade: quantidadesPacotes[p.id],
+      }));
+    return [...doServicos, ...doPacotes];
+  }, [servicos, pacotes, quantidades, quantidadesPacotes]);
   const totalItens = itensSelecionados.reduce((total, item) => total + item.quantidade, 0);
-  const duracaoTotalMinutos = itensSelecionados.reduce((total, item) => total + item.servico.duracaoMinutos * item.quantidade, 0);
-  const precoTotalCentavos = itensSelecionados.reduce((total, item) => total + item.servico.precoCentavos * item.quantidade, 0);
+  const duracaoTotalMinutos = itensSelecionados.reduce((total, item) => total + item.duracaoMinutos * item.quantidade, 0);
+  const precoTotalCentavos = itensSelecionados.reduce((total, item) => total + item.precoCentavos * item.quantidade, 0);
 
   function alterarQuantidade(servicoId: string, delta: number) {
     setQuantidades((atual) => ({ ...atual, [servicoId]: Math.max(0, (atual[servicoId] ?? 0) + delta) }));
     // A duração total muda, então o dia/horário escolhidos antes podem não
     // caber mais — melhor pedir pra escolher de novo do que arriscar um
     // agendamento que estoura o horário de outro cliente.
+    setDiaSelecionado(undefined);
+    setHorarioSelecionado(undefined);
+  }
+
+  function alterarQuantidadePacote(pacoteId: string, delta: number) {
+    setQuantidadesPacotes((atual) => ({ ...atual, [pacoteId]: Math.max(0, (atual[pacoteId] ?? 0) + delta) }));
     setDiaSelecionado(undefined);
     setHorarioSelecionado(undefined);
   }
@@ -138,7 +190,9 @@ export function BookingScreen({ route, navigation }: Props) {
       // no aparelho do cliente pra não agendar num horário errado.
       const inicio = `${diaSelecionado}T${horarioSelecionado}:00-03:00`;
       const itens = itensSelecionados.flatMap((item) =>
-        Array.from({ length: item.quantidade }, () => ({ servicoId: item.servico.id })),
+        Array.from({ length: item.quantidade }, () =>
+          item.tipo === "servico" ? { servicoId: item.id } : { pacoteId: item.id },
+        ),
       );
       await api.post("/agendamentos/lote", { inicio, itens });
       Alert.alert("Agendamento confirmado!", "Você pode acompanhar em Meus agendamentos.");
@@ -155,36 +209,92 @@ export function BookingScreen({ route, navigation }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.sectionTitle}>Serviços</Text>
-        <View style={{ gap: spacing.sm }}>
-          {servicos.map((s) => {
-            const quantidade = quantidades[s.id] ?? 0;
-            return (
-              <Card key={s.id} style={styles.servicoLinha}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemNome}>{s.nome}</Text>
-                  <Text style={styles.itemMeta}>
-                    {s.duracaoMinutos} min · {centavosParaReais(s.precoCentavos)}
-                  </Text>
+        {mostrarSelecao ? (
+          <>
+            <Text style={styles.sectionTitle}>Serviços</Text>
+            <View style={{ gap: spacing.sm }}>
+              {servicos.map((s) => {
+                const quantidade = quantidades[s.id] ?? 0;
+                return (
+                  <Card key={s.id} style={styles.servicoLinha}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemNome}>{s.nome}</Text>
+                      <Text style={styles.itemMeta}>
+                        {s.duracaoMinutos} min · {centavosParaReais(s.precoCentavos)}
+                      </Text>
+                    </View>
+                    <View style={styles.stepper}>
+                      <Pressable onPress={() => alterarQuantidade(s.id, -1)} disabled={quantidade === 0} hitSlop={8}>
+                        <Ionicons name="remove-circle" size={26} color={quantidade === 0 ? colors.border : colors.accent} />
+                      </Pressable>
+                      <Text style={styles.stepperValor}>{quantidade}</Text>
+                      <Pressable onPress={() => alterarQuantidade(s.id, 1)} hitSlop={8}>
+                        <Ionicons name="add-circle" size={26} color={colors.accent} />
+                      </Pressable>
+                    </View>
+                  </Card>
+                );
+              })}
+            </View>
+
+            {pacotes.length > 0 && (
+              <>
+                <Text style={styles.sectionTitle}>Pacotes</Text>
+                <View style={{ gap: spacing.sm }}>
+                  {pacotes.map((p) => {
+                    const quantidade = quantidadesPacotes[p.id] ?? 0;
+                    return (
+                      <Card key={p.id} style={styles.servicoLinha}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.itemNome}>{p.nome}</Text>
+                          <Text style={styles.itemMeta}>
+                            {duracaoDoPacote(p)} min · {centavosParaReais(p.precoCentavos)}
+                          </Text>
+                          {p.descricao && <Text style={styles.itemMeta}>{p.descricao}</Text>}
+                        </View>
+                        <View style={styles.stepper}>
+                          <Pressable onPress={() => alterarQuantidadePacote(p.id, -1)} disabled={quantidade === 0} hitSlop={8}>
+                            <Ionicons name="remove-circle" size={26} color={quantidade === 0 ? colors.border : colors.accent} />
+                          </Pressable>
+                          <Text style={styles.stepperValor}>{quantidade}</Text>
+                          <Pressable onPress={() => alterarQuantidadePacote(p.id, 1)} hitSlop={8}>
+                            <Ionicons name="add-circle" size={26} color={colors.accent} />
+                          </Pressable>
+                        </View>
+                      </Card>
+                    );
+                  })}
                 </View>
-                <View style={styles.stepper}>
-                  <Pressable onPress={() => alterarQuantidade(s.id, -1)} disabled={quantidade === 0} hitSlop={8}>
-                    <Ionicons name="remove-circle" size={26} color={quantidade === 0 ? colors.border : colors.accent} />
-                  </Pressable>
-                  <Text style={styles.stepperValor}>{quantidade}</Text>
-                  <Pressable onPress={() => alterarQuantidade(s.id, 1)} hitSlop={8}>
-                    <Ionicons name="add-circle" size={26} color={colors.accent} />
-                  </Pressable>
-                </View>
-              </Card>
-            );
-          })}
-        </View>
+              </>
+            )}
+          </>
+        ) : (
+          <>
+            <Text style={styles.sectionTitle}>Itens selecionados</Text>
+            <View style={{ gap: spacing.sm }}>
+              {itensSelecionados.map((item) => (
+                <Card key={`${item.tipo}-${item.id}`} style={styles.servicoLinha}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.itemNome}>
+                      {item.quantidade}x {item.nome}
+                    </Text>
+                    <Text style={styles.itemMeta}>
+                      {item.duracaoMinutos} min · {centavosParaReais(item.precoCentavos)}
+                    </Text>
+                  </View>
+                </Card>
+              ))}
+            </View>
+            <Pressable onPress={() => setMostrarSelecao(true)} hitSlop={8}>
+              <Text style={styles.linkAlterar}>Alterar itens</Text>
+            </Pressable>
+          </>
+        )}
 
         {totalItens > 0 && (
           <Card style={styles.resumoCard}>
             <Text style={styles.resumoTexto}>
-              {totalItens} {totalItens === 1 ? "serviço" : "serviços"} selecionado{totalItens === 1 ? "" : "s"} · ~
+              {totalItens} {totalItens === 1 ? "item" : "itens"} selecionado{totalItens === 1 ? "" : "s"} · ~
               {duracaoTotalMinutos} min
             </Text>
             <Text style={styles.resumoValor}>{centavosParaReais(precoTotalCentavos)}</Text>
@@ -243,11 +353,11 @@ export function BookingScreen({ route, navigation }: Props) {
             <Card style={{ gap: spacing.sm }}>
               <View style={{ gap: 4 }}>
                 {itensSelecionados.map((item) => (
-                  <View key={item.servico.id} style={styles.confirmLinha}>
+                  <View key={`${item.tipo}-${item.id}`} style={styles.confirmLinha}>
                     <Text style={styles.confirmServico}>
-                      {item.quantidade}x {item.servico.nome}
+                      {item.quantidade}x {item.nome}
                     </Text>
-                    <Text style={styles.confirmServico}>{centavosParaReais(item.servico.precoCentavos * item.quantidade)}</Text>
+                    <Text style={styles.confirmServico}>{centavosParaReais(item.precoCentavos * item.quantidade)}</Text>
                   </View>
                 ))}
               </View>
@@ -319,6 +429,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
   },
   hint: { fontSize: 12, color: colors.inkMuted },
+  linkAlterar: { fontSize: 13, fontWeight: "700", color: colors.accent, marginTop: -spacing.xs },
   servicoLinha: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   itemNome: { fontSize: 14, fontWeight: "700", color: colors.ink },
   itemMeta: { fontSize: 12, color: colors.inkMuted, marginTop: 2 },

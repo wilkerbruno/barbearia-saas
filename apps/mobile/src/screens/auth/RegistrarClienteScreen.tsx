@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
@@ -30,41 +30,51 @@ export function RegistrarClienteScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Criar conta</Text>
-        <Text style={styles.subtitle}>Para agendar horários nas barbearias parceiras</Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.title}>Criar conta</Text>
+          <Text style={styles.subtitle}>Para agendar horários nas barbearias parceiras</Text>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>Nome</Text>
-          <TextInput value={nome} onChangeText={setNome} style={styles.input} placeholder="Seu nome" />
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>E-mail</Text>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={styles.input}
-            placeholder="voce@email.com"
-          />
-        </View>
-        <View style={styles.field}>
-          <Text style={styles.label}>Senha</Text>
-          <PasswordInput value={senha} onChangeText={setSenha} style={styles.input} placeholder="Mínimo 6 caracteres" />
-        </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Nome</Text>
+            <TextInput value={nome} onChangeText={setNome} style={styles.input} placeholder="Seu nome" />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>E-mail</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              style={styles.input}
+              placeholder="voce@email.com"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Senha</Text>
+            <PasswordInput value={senha} onChangeText={setSenha} style={styles.input} placeholder="Mínimo 6 caracteres" />
+          </View>
 
-        {erro && <Text style={styles.erro}>{erro}</Text>}
+          {erro && <Text style={styles.erro}>{erro}</Text>}
 
-        <Button label="Criar conta" onPress={handleRegistrar} loading={carregando} />
-      </View>
+          <Button label="Criar conta" onPress={handleRegistrar} loading={carregando} />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { flex: 1, padding: spacing.xl, justifyContent: "center", gap: spacing.md },
+  content: { flexGrow: 1, padding: spacing.xl, justifyContent: "center", gap: spacing.md },
   title: { fontSize: 26, fontWeight: "800", color: colors.ink },
   subtitle: { fontSize: 13, color: colors.inkMuted, marginBottom: spacing.lg },
   field: { gap: spacing.xs },

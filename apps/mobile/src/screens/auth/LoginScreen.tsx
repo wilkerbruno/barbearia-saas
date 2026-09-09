@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { api } from "../../api/client";
@@ -35,49 +35,62 @@ export function LoginScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Entrar</Text>
-        <Text style={styles.subtitle}>Acesse sua conta de cliente, funcionário ou barbearia</Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Text style={styles.title}>Entrar</Text>
+          <Text style={styles.subtitle}>Acesse sua conta de cliente, funcionário ou barbearia</Text>
 
-        <View style={styles.field}>
-          <Text style={styles.label}>E-mail</Text>
-          <TextInput
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            style={styles.input}
-            placeholder="voce@email.com"
+          <View style={styles.field}>
+            <Text style={styles.label}>E-mail</Text>
+            <TextInput
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              style={styles.input}
+              placeholder="voce@email.com"
+            />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Senha</Text>
+            <PasswordInput
+              value={senha}
+              onChangeText={setSenha}
+              style={styles.input}
+              placeholder="••••••••"
+            />
+          </View>
+
+          {erro && <Text style={styles.erro}>{erro}</Text>}
+
+          <Button label="Entrar" onPress={handleLogin} loading={carregando} />
+
+          <Button
+            label="Criar conta de cliente"
+            variant="secondary"
+            onPress={() => navigation.navigate("RegistrarCliente")}
           />
-        </View>
-
-        <View style={styles.field}>
-          <Text style={styles.label}>Senha</Text>
-          <PasswordInput
-            value={senha}
-            onChangeText={setSenha}
-            style={styles.input}
-            placeholder="••••••••"
-          />
-        </View>
-
-        {erro && <Text style={styles.erro}>{erro}</Text>}
-
-        <Button label="Entrar" onPress={handleLogin} loading={carregando} />
-
-        <Button
-          label="Criar conta de cliente"
-          variant="secondary"
-          onPress={() => navigation.navigate("RegistrarCliente")}
-        />
-      </View>
+          <Text style={styles.linkBarbearia} onPress={() => navigation.navigate("RegistrarBarbearia")}>
+            É dono de barbearia? Cadastre sua barbearia
+          </Text>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { flex: 1, padding: spacing.xl, justifyContent: "center", gap: spacing.md },
+  content: { flexGrow: 1, padding: spacing.xl, justifyContent: "center", gap: spacing.md },
   title: { fontSize: 26, fontWeight: "800", color: colors.ink },
   subtitle: { fontSize: 13, color: colors.inkMuted, marginBottom: spacing.lg },
   field: { gap: spacing.xs },
@@ -93,4 +106,5 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   erro: { color: colors.danger, fontSize: 13 },
+  linkBarbearia: { textAlign: "center", fontSize: 13, color: colors.accent, fontWeight: "600", marginTop: spacing.sm },
 });

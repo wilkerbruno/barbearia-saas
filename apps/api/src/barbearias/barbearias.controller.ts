@@ -8,7 +8,11 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
 import { Papel } from "@barbearia-saas/shared";
 import { BarbeariasService } from "./barbearias.service";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
@@ -100,6 +104,23 @@ export class BarbeariasController {
   atualizar(@Param("id") id: string, @Body() dto: UpdateBarbeariaDto, @CurrentUser() user: AuthUser) {
     this.garantirAcesso(id, user);
     return this.barbeariasService.atualizar(id, dto);
+  }
+
+  // Envio da logo — usado tanto logo após o cadastro da barbearia (Criar conta
+  // de barbearia, no app) quanto depois, em "Mais > Logo". Recebe multipart
+  // (campo "logo"); a API redimensiona/comprime antes de guardar.
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @Post(":id/logo")
+  @UseInterceptors(
+    FileInterceptor("logo", { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }),
+  )
+  enviarLogo(
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
+    this.garantirAcesso(id, user);
+    return this.barbeariasService.atualizarLogo(id, file);
   }
 
   // Público: estrelas + comentários de quem já avaliou (tela de detalhe da barbearia).

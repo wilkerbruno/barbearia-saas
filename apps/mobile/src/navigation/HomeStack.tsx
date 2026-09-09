@@ -4,9 +4,13 @@ import { HomeScreen } from "../screens/cliente/HomeScreen";
 import { BookingScreen } from "../screens/cliente/BookingScreen";
 import { darkStackScreenOptions } from "./stackHeaderOptions";
 
+// Um item pré-selecionado na Home (serviço OU pacote) que chega pronto pra
+// tela de Agendar, pulando direto pra escolha de dia/horário.
+export type ItemPreSelecionado = { servicoId?: string } | { pacoteId?: string };
+
 export type HomeStackParamList = {
   Home: undefined;
-  Agendar: { servicoId?: string };
+  Agendar: { itensPreSelecionados?: ItemPreSelecionado[] } | undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();

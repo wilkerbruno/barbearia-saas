@@ -1,11 +1,12 @@
 {
   "expo": {
-    "name": "Barbearia Alameda",
+    "name": "Barber One",
     "slug": "barbearia-saas-app",
     "scheme": "barbeariasaas",
     "version": "0.1.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -14,10 +15,15 @@
     },
     "android": {
       "package": "com.divisionstech.barbeariasaas",
-      "versionCode": 1
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#141110"
+      }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "extra": {
       "eas": {

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import sharp from "sharp";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
 import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
@@ -13,9 +14,13 @@ const SELECT_PUBLICO = {
   telefone: true,
   latitude: true,
   longitude: true,
+  logoUrl: true,
   notaMedia: true,
   totalAvaliacoes: true,
 } as const;
+
+// Tamanho máximo aceito pro arquivo de logo enviado (antes de comprimir).
+const TAMANHO_MAXIMO_LOGO_BYTES = 5 * 1024 * 1024; // 5MB
 
 @Injectable()
 export class BarbeariasService {
@@ -50,6 +55,37 @@ export class BarbeariasService {
 
   atualizar(id: string, dto: UpdateBarbeariaDto) {
     return this.prisma.barbearia.update({ where: { id }, data: dto });
+  }
+
+  // Recebe o arquivo de logo enviado pelo dono (registro da barbearia ou
+  // Mais > Logo), redimensiona/comprime com sharp e guarda como data URL
+  // (base64) direto no banco — ver comentário do campo logoUrl no schema.
+  async atualizarLogo(id: string, file?: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Envie um arquivo de imagem no campo "logo".');
+    if (!file.mimetype.startsWith("image/")) {
+      throw new BadRequestException("O arquivo enviado precisa ser uma imagem.");
+    }
+    if (file.size > TAMANHO_MAXIMO_LOGO_BYTES) {
+      throw new BadRequestException("A imagem enviada é muito grande (máximo 5MB).");
+    }
+
+    let comprimida: Buffer;
+    try {
+      comprimida = await sharp(file.buffer)
+        .rotate() // aplica a orientação EXIF (fotos tiradas na vertical no celular) antes de cortar
+        .resize(512, 512, { fit: "cover" })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+    } catch {
+      throw new BadRequestException("Não foi possível processar essa imagem. Tente outro arquivo.");
+    }
+
+    const logoUrl = `data:image/jpeg;base64,${comprimida.toString("base64")}`;
+    return this.prisma.barbearia.update({
+      where: { id },
+      data: { logoUrl },
+      select: { id: true, logoUrl: true },
+    });
   }
 
   // Público: o app do cliente usa isso para montar a lista de profissionais

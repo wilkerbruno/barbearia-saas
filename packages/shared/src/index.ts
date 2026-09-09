@@ -42,6 +42,9 @@ export interface Barbearia {
   telefone?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  // Data URL (base64) da logo, já redimensionada pela API — ver
+  // BarbeariasService.atualizarLogo. null/undefined = sem logo enviada ainda.
+  logoUrl?: string | null;
   notaMedia: number;
   totalAvaliacoes: number;
   criadoEm: string;
@@ -57,7 +60,7 @@ export interface BarbeariaProxima extends Barbearia {
 // que não tem permissão pra ler a barbearia inteira via GET /barbearias/:id).
 export type BarbeariaPublica = Pick<
   Barbearia,
-  "id" | "nome" | "endereco" | "telefone" | "notaMedia" | "totalAvaliacoes"
+  "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes"
 >;
 
 // ============================= SERVIÇOS E PACOTES =============================

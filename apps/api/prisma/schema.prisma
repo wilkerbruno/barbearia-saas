@@ -48,6 +48,12 @@ model Barbearia {
   slug      String   @unique
   endereco  String?
   telefone  String?
+  // Logo da barbearia enviada pelo dono (Mais > Logo, ou no cadastro). Guardada
+  // como data URL (base64) direto no banco — já vem redimensionada/comprimida
+  // pela API (ver BarbeariasService.atualizarLogo) então fica pequena o
+  // suficiente pra isso, e evita depender de um serviço de storage externo
+  // (S3 etc.) que o projeto ainda não tem configurado.
+  logoUrl   String?  @db.LongText
   // Coordenadas usadas na busca "barbearias próximas" do app do cliente.
   // Preenchidas pelo dono em "Mais > Localização" (captura o GPS do celular dele).
   latitude  Float?

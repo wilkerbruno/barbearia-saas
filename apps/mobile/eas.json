@@ -6,15 +6,28 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://banco-de-dados-barbearia.lcgx8u.easypanel.host/api",
+        "EXPO_PUBLIC_BARBEARIA_ID": "f6b3670a-4054-44e5-800c-f743e0742bd6"
+      }
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://banco-de-dados-barbearia.lcgx8u.easypanel.host/api",
+        "EXPO_PUBLIC_BARBEARIA_ID": "f6b3670a-4054-44e5-800c-f743e0742bd6"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://banco-de-dados-barbearia.lcgx8u.easypanel.host/api",
+        "EXPO_PUBLIC_BARBEARIA_ID": "f6b3670a-4054-44e5-800c-f743e0742bd6"
+      }
+    }
   },
   "submit": {
     "production": {}

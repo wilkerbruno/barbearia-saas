@@ -28,8 +28,29 @@ export function BarbeariaFinanceiroScreen() {
   const [resumo, setResumo] = useState<ResumoBarbearia | null>(null);
 
   const carregar = useCallback(async (p: ResumoFinanceiro["periodo"]) => {
-    const { data } = await api.get<ResumoBarbearia>("/financeiro/resumo-barbearia", { params: { periodo: p } });
-    setResumo(data);
+    try {
+      const { data } = await api.get<ResumoBarbearia>("/financeiro/resumo-barbearia", { params: { periodo: p } });
+      // Defensivo: se a API em produção ainda estiver numa versão antiga (sem
+      // "porFuncionario"/"porServico" na resposta), evita o crash de tela
+      // branca — mostra zerado em vez de derrubar o app numa barbearia nova.
+      setResumo({
+        atendimentos: data.atendimentos ?? 0,
+        faturamentoCentavos: data.faturamentoCentavos ?? 0,
+        comissoesCentavos: data.comissoesCentavos ?? 0,
+        lucroCentavos: data.lucroCentavos ?? 0,
+        porFuncionario: data.porFuncionario ?? [],
+        porServico: data.porServico ?? [],
+      });
+    } catch {
+      setResumo({
+        atendimentos: 0,
+        faturamentoCentavos: 0,
+        comissoesCentavos: 0,
+        lucroCentavos: 0,
+        porFuncionario: [],
+        porServico: [],
+      });
+    }
   }, []);
 
   useFocusEffect(useCallback(() => { carregar(periodo); }, [carregar, periodo]));
@@ -65,6 +86,9 @@ export function BarbeariaFinanceiroScreen() {
             </View>
 
             <Text style={styles.sectionTitle}>Por funcionário</Text>
+            {resumo.porFuncionario.length === 0 && (
+              <Text style={{ fontSize: 12, color: colors.inkMuted }}>Nenhum atendimento concluído nesse período.</Text>
+            )}
             {resumo.porFuncionario.map((f) => (
               <Card key={f.nome} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                 <View>
