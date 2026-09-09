@@ -1,11 +1,10 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from "@nestjs/common";
 import { Papel } from "@barbearia-saas/shared";
 import { AssinaturasService } from "./assinaturas.service";
 import { CriarCheckoutDto } from "./dto/criar-checkout.dto";
 import { MudarPlanoDto } from "./dto/mudar-plano.dto";
 import { DefinirStatusAssinaturaDto } from "./dto/definir-status-assinatura.dto";
 import { Roles } from "../common/decorators/roles.decorator";
-import { Public } from "../common/decorators/public.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AuthUser } from "../auth/jwt.strategy";
 
@@ -63,14 +62,5 @@ export class AssinaturasController {
   @Get("faturas")
   listarFaturas() {
     return this.assinaturasService.listarFaturas();
-  }
-
-  // Endpoint que o Mercado Pago chama (configurado em "Suas integrações" >
-  // Webhooks). Público porque a autenticação real é a assinatura HMAC do
-  // header x-signature, verificada dentro do service.
-  @Public()
-  @Post("webhooks/pagamento")
-  webhook(@Body() payload: unknown, @Query() query: Record<string, string>, @Headers() headers: Record<string, string>) {
-    return this.assinaturasService.processarEventoPagamento(payload, query, headers);
   }
 }

@@ -7,6 +7,7 @@ import { EquipeScreen } from "../screens/barbearia/EquipeScreen";
 import { AssinaturaScreen } from "../screens/barbearia/AssinaturaScreen";
 import { LocalizacaoScreen } from "../screens/barbearia/LocalizacaoScreen";
 import { LogoScreen } from "../screens/barbearia/LogoScreen";
+import { ConectarMercadoPagoScreen } from "../screens/barbearia/ConectarMercadoPagoScreen";
 import { darkStackScreenOptions } from "./stackHeaderOptions";
 
 export type MaisStackParamList = {
@@ -17,6 +18,7 @@ export type MaisStackParamList = {
   Assinatura: undefined;
   Localizacao: undefined;
   Logo: undefined;
+  MercadoPago: undefined;
 };
 
 const Stack = createNativeStackNavigator<MaisStackParamList>();
@@ -31,6 +33,7 @@ export function MaisStackNavigator() {
       <Stack.Screen name="Assinatura" component={AssinaturaScreen} options={{ headerShown: true, title: "Assinatura" }} />
       <Stack.Screen name="Localizacao" component={LocalizacaoScreen} options={{ headerShown: true, title: "Localização" }} />
       <Stack.Screen name="Logo" component={LogoScreen} options={{ headerShown: true, title: "Logo da barbearia" }} />
+      <Stack.Screen name="MercadoPago" component={ConectarMercadoPagoScreen} options={{ headerShown: true, title: "Mercado Pago" }} />
     </Stack.Navigator>
   );
 }

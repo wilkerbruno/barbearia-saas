@@ -1,8 +1,10 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
+import { PrismaService } from "../prisma/prisma.service";
 
 const MP_API_URL = "https://api.mercadopago.com";
+const MP_AUTH_URL = "https://auth.mercadopago.com";
 
 export interface PreapprovalCriado {
   id: string;
@@ -34,21 +36,58 @@ export interface PaymentDetalhe {
   dataCriacao: string;
 }
 
-// Integração com o Mercado Pago pra cobrar a mensalidade das barbearias
-// assinantes do SaaS. Usa a API de "Preapproval" (assinatura recorrente com
-// cartão salvo, cobrada automaticamente todo mês) — ver AssinaturasService
-// pra como isso se encaixa no fluxo de troca/contratação de plano, e
-// apps/api/.env.example pra como configurar as credenciais.
+export interface PixCriado {
+  id: string;
+  status: string;
+  qrCodeBase64: string | null;
+  qrCode: string | null;
+}
+
+export interface CheckoutPreferenceCriada {
+  id: string;
+  initPoint: string;
+}
+
+export interface TokensOAuth {
+  accessToken: string;
+  refreshToken: string | null;
+  publicKey: string | null;
+  userId: string;
+  expiraEm: Date;
+}
+
+// Integração com o Mercado Pago. Serve DOIS fluxos de dinheiro bem diferentes
+// — não confundir:
+//
+// 1) Cobrar a MENSALIDADE DO SAAS das barbearias assinantes, pra conta da
+//    própria Divisions Tech (ver AssinaturasService) — usa o access token
+//    "de plataforma" (MERCADOPAGO_ACCESS_TOKEN), API de Preapproval.
+//
+// 2) Cobrar o CLIENTE FINAL em nome da barbearia (modelo marketplace/Connect
+//    — ver AgendamentosService, PacotesMensaisService, BarbeariasMercadoPagoService):
+//    cada barbearia autoriza a própria conta via OAuth (gerarUrlAutorizacao/
+//    trocarCodigoPorToken), e as chamadas de pagamento usam o access token
+//    DAQUELA barbearia (accessTokenOverride) — o dinheiro cai direto lá, não
+//    passa pela conta da Divisions Tech.
 //
 // Documentação oficial: https://www.mercadopago.com.br/developers/pt/docs/subscriptions
+// e https://www.mercadopago.com.br/developers/pt/docs/checkout-pro/overview
+// e https://www.mercadopago.com.br/developers/pt/docs/security/oauth/introduction
 @Injectable()
 export class MercadoPagoService {
   private readonly logger = new Logger(MercadoPagoService.name);
 
-  constructor(private config: ConfigService) {}
+  constructor(
+    private config: ConfigService,
+    private prisma: PrismaService,
+  ) {}
 
   get configurado(): boolean {
     return !!this.config.get<string>("MERCADOPAGO_ACCESS_TOKEN");
+  }
+
+  get oauthConfigurado(): boolean {
+    return !!this.config.get<string>("MERCADOPAGO_CLIENT_ID") && !!this.config.get<string>("MERCADOPAGO_CLIENT_SECRET");
   }
 
   private get accessToken(): string {
@@ -57,11 +96,11 @@ export class MercadoPagoService {
     return token;
   }
 
-  private async chamar<T>(path: string, init?: RequestInit): Promise<T> {
+  private async chamar<T>(path: string, init?: RequestInit, accessTokenOverride?: string): Promise<T> {
     const resposta = await fetch(`${MP_API_URL}${path}`, {
       ...init,
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: `Bearer ${accessTokenOverride ?? this.accessToken}`,
         "Content-Type": "application/json",
         ...(init?.headers ?? {}),
       },
@@ -74,37 +113,158 @@ export class MercadoPagoService {
     return corpo as T;
   }
 
+  // ============================= OAUTH (conta da barbearia) =============================
+
+  // URL pra abrir no navegador do dono da barbearia — ele loga na PRÓPRIA
+  // conta Mercado Pago e autoriza. `state` deve conter algo que identifique
+  // a barbearia de volta no callback (ver BarbeariasMercadoPagoService, que
+  // usa um token assinado em vez do id cru, pra ninguém conseguir conectar a
+  // conta de outra barbearia adivinhando o id).
+  gerarUrlAutorizacao(state: string): string {
+    const clientId = this.config.get<string>("MERCADOPAGO_CLIENT_ID");
+    const redirectUri = this.config.get<string>("MERCADOPAGO_OAUTH_REDIRECT_URI");
+    if (!clientId || !redirectUri) {
+      throw new BadRequestException("Conexão com Mercado Pago ainda não configurada nesta instalação. Fale com o suporte.");
+    }
+    const params = new URLSearchParams({
+      client_id: clientId,
+      response_type: "code",
+      platform_id: "mp",
+      redirect_uri: redirectUri,
+      state,
+    });
+    return `${MP_AUTH_URL}/authorization?${params.toString()}`;
+  }
+
+  // Troca o "code" que o Mercado Pago devolveu no redirect por um access
+  // token de verdade da conta da barbearia. Chamada uma vez, no callback.
+  async trocarCodigoPorToken(code: string): Promise<TokensOAuth> {
+    const clientId = this.config.get<string>("MERCADOPAGO_CLIENT_ID");
+    const clientSecret = this.config.get<string>("MERCADOPAGO_CLIENT_SECRET");
+    const redirectUri = this.config.get<string>("MERCADOPAGO_OAUTH_REDIRECT_URI");
+    const resposta = await fetch(`${MP_API_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+      }),
+    });
+    const corpo: any = await resposta.json().catch(() => null);
+    if (!resposta.ok) {
+      this.logger.error(`Falha ao trocar code por token no Mercado Pago: ${resposta.status} ${JSON.stringify(corpo)}`);
+      throw new BadRequestException("Não foi possível concluir a conexão com o Mercado Pago. Tente novamente.");
+    }
+    return {
+      accessToken: corpo.access_token,
+      refreshToken: corpo.refresh_token ?? null,
+      publicKey: corpo.public_key ?? null,
+      userId: String(corpo.user_id),
+      expiraEm: new Date(Date.now() + (corpo.expires_in ?? 15552000) * 1000), // padrão MP: 180 dias
+    };
+  }
+
+  private async renovarToken(refreshToken: string): Promise<TokensOAuth> {
+    const clientId = this.config.get<string>("MERCADOPAGO_CLIENT_ID");
+    const clientSecret = this.config.get<string>("MERCADOPAGO_CLIENT_SECRET");
+    const resposta = await fetch(`${MP_API_URL}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
+    });
+    const corpo: any = await resposta.json().catch(() => null);
+    if (!resposta.ok) {
+      this.logger.error(`Falha ao renovar token do Mercado Pago: ${resposta.status} ${JSON.stringify(corpo)}`);
+      throw new BadRequestException(
+        "A conexão dessa barbearia com o Mercado Pago expirou. Peça pro dono reconectar em Mais > Mercado Pago.",
+      );
+    }
+    return {
+      accessToken: corpo.access_token,
+      refreshToken: corpo.refresh_token ?? refreshToken,
+      publicKey: corpo.public_key ?? null,
+      userId: String(corpo.user_id),
+      expiraEm: new Date(Date.now() + (corpo.expires_in ?? 15552000) * 1000),
+    };
+  }
+
+  // Devolve um access token válido da barbearia, renovando (e persistindo)
+  // automaticamente se estiver perto de expirar. É o que AgendamentosService/
+  // PacotesMensaisService devem chamar antes de qualquer operação de
+  // pagamento — nunca leem mercadoPagoAccessToken direto do banco.
+  async tokenDaBarbearia(barbeariaId: string): Promise<string> {
+    const barbearia = await this.prisma.barbearia.findUnique({
+      where: { id: barbeariaId },
+      select: { mercadoPagoAccessToken: true, mercadoPagoRefreshToken: true, mercadoPagoTokenExpiraEm: true },
+    });
+    if (!barbearia?.mercadoPagoAccessToken) {
+      throw new BadRequestException(
+        "Essa barbearia ainda não conectou uma conta Mercado Pago — peça pro dono conectar em Mais > Mercado Pago antes de agendar com pagamento.",
+      );
+    }
+    const prestesAExpirar =
+      !barbearia.mercadoPagoTokenExpiraEm || barbearia.mercadoPagoTokenExpiraEm.getTime() - Date.now() < 24 * 60 * 60 * 1000;
+    if (!prestesAExpirar) return barbearia.mercadoPagoAccessToken;
+
+    if (!barbearia.mercadoPagoRefreshToken) return barbearia.mercadoPagoAccessToken; // nada a fazer, tenta com o que tem
+
+    const tokens = await this.renovarToken(barbearia.mercadoPagoRefreshToken);
+    await this.prisma.barbearia.update({
+      where: { id: barbeariaId },
+      data: {
+        mercadoPagoAccessToken: tokens.accessToken,
+        mercadoPagoRefreshToken: tokens.refreshToken,
+        mercadoPagoTokenExpiraEm: tokens.expiraEm,
+      },
+    });
+    return tokens.accessToken;
+  }
+
+  // ============================= ASSINATURA RECORRENTE (Preapproval) =============================
+
   // Cria a assinatura (cobrança recorrente mensal) no Mercado Pago. O pagador
   // precisa abrir `initPoint` e autorizar com o cartão dele — a cobrança de
   // verdade só começa depois disso (ver o webhook "subscription_preapproval").
-  async criarPreapproval(params: {
-    reason: string;
-    externalReference: string;
-    payerEmail: string;
-    precoCentavos: number;
-    backUrl: string;
-  }): Promise<PreapprovalCriado> {
-    const corpo: any = await this.chamar("/preapproval", {
-      method: "POST",
-      body: JSON.stringify({
-        reason: params.reason,
-        external_reference: params.externalReference,
-        payer_email: params.payerEmail,
-        back_url: params.backUrl,
-        status: "pending",
-        auto_recurring: {
-          frequency: 1,
-          frequency_type: "months",
-          transaction_amount: Math.round(params.precoCentavos) / 100,
-          currency_id: "BRL",
-        },
-      }),
-    });
+  // `accessTokenOverride`: passar o token da barbearia quando for uma
+  // assinatura de pacote mensal (cliente pagando a barbearia); omitir usa o
+  // token de plataforma (assinatura SaaS da barbearia com a Divisions Tech).
+  async criarPreapproval(
+    params: { reason: string; externalReference: string; payerEmail: string; precoCentavos: number; backUrl: string },
+    accessTokenOverride?: string,
+  ): Promise<PreapprovalCriado> {
+    const corpo: any = await this.chamar(
+      "/preapproval",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          reason: params.reason,
+          external_reference: params.externalReference,
+          payer_email: params.payerEmail,
+          back_url: params.backUrl,
+          status: "pending",
+          auto_recurring: {
+            frequency: 1,
+            frequency_type: "months",
+            transaction_amount: Math.round(params.precoCentavos) / 100,
+            currency_id: "BRL",
+          },
+        }),
+      },
+      accessTokenOverride,
+    );
     return { id: String(corpo.id), initPoint: corpo.init_point, status: corpo.status };
   }
 
-  async buscarPreapproval(id: string): Promise<PreapprovalDetalhe> {
-    const corpo: any = await this.chamar(`/preapproval/${id}`);
+  async buscarPreapproval(id: string, accessTokenOverride?: string): Promise<PreapprovalDetalhe> {
+    const corpo: any = await this.chamar(`/preapproval/${id}`, undefined, accessTokenOverride);
     return {
       id: String(corpo.id),
       status: corpo.status,
@@ -115,12 +275,12 @@ export class MercadoPagoService {
 
   // Usado quando o dono cancela a assinatura pelo app — cancela também do
   // lado do Mercado Pago pra parar a cobrança recorrente de verdade.
-  async cancelarPreapproval(id: string): Promise<void> {
-    await this.chamar(`/preapproval/${id}`, { method: "PUT", body: JSON.stringify({ status: "cancelled" }) });
+  async cancelarPreapproval(id: string, accessTokenOverride?: string): Promise<void> {
+    await this.chamar(`/preapproval/${id}`, { method: "PUT", body: JSON.stringify({ status: "cancelled" }) }, accessTokenOverride);
   }
 
-  async buscarAuthorizedPayment(id: string): Promise<AuthorizedPaymentDetalhe> {
-    const corpo: any = await this.chamar(`/authorized_payments/${id}`);
+  async buscarAuthorizedPayment(id: string, accessTokenOverride?: string): Promise<AuthorizedPaymentDetalhe> {
+    const corpo: any = await this.chamar(`/authorized_payments/${id}`, undefined, accessTokenOverride);
     return {
       id: String(corpo.id),
       preapprovalId: corpo.preapproval_id != null ? String(corpo.preapproval_id) : null,
@@ -129,8 +289,76 @@ export class MercadoPagoService {
     };
   }
 
-  async buscarPayment(id: string): Promise<PaymentDetalhe> {
-    const corpo: any = await this.chamar(`/v1/payments/${id}`);
+  // ============================= PAGAMENTO AVULSO (Pix / Cartão) =============================
+
+  // Cria uma cobrança Pix avulsa (não recorrente) — usada pra pagar UM
+  // agendamento. Devolve o QR code pronto pra exibir; a confirmação de
+  // verdade chega pelo webhook "payment" (ver AgendamentosService).
+  async criarPagamentoPix(params: {
+    valorCentavos: number;
+    descricao: string;
+    externalReference: string;
+    payerEmail: string;
+  }, accessTokenOverride: string): Promise<PixCriado> {
+    const corpo: any = await this.chamar(
+      "/v1/payments",
+      {
+        method: "POST",
+        headers: { "X-Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          transaction_amount: Math.round(params.valorCentavos) / 100,
+          description: params.descricao,
+          payment_method_id: "pix",
+          external_reference: params.externalReference,
+          payer: { email: params.payerEmail },
+        }),
+      },
+      accessTokenOverride,
+    );
+    const dadosPix = corpo.point_of_interaction?.transaction_data;
+    return {
+      id: String(corpo.id),
+      status: corpo.status,
+      qrCodeBase64: dadosPix?.qr_code_base64 ?? null,
+      qrCode: dadosPix?.qr_code ?? null,
+    };
+  }
+
+  // Cria uma preference do Checkout Pro (página de pagamento hospedada pelo
+  // próprio Mercado Pago) pra pagamento com cartão — evita o app ou a API
+  // precisarem tocar em número de cartão. Devolve o link pra abrir.
+  async criarPreferenceCheckout(params: {
+    valorCentavos: number;
+    descricao: string;
+    externalReference: string;
+    backUrls: { success: string; pending: string; failure: string };
+  }, accessTokenOverride: string): Promise<CheckoutPreferenceCriada> {
+    const corpo: any = await this.chamar(
+      "/checkout/preferences",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          items: [
+            {
+              title: params.descricao,
+              quantity: 1,
+              currency_id: "BRL",
+              unit_price: Math.round(params.valorCentavos) / 100,
+            },
+          ],
+          external_reference: params.externalReference,
+          back_urls: params.backUrls,
+          auto_return: "approved",
+          payment_methods: { excluded_payment_types: [{ id: "ticket" }] },
+        }),
+      },
+      accessTokenOverride,
+    );
+    return { id: String(corpo.id), initPoint: corpo.init_point };
+  }
+
+  async buscarPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
+    const corpo: any = await this.chamar(`/v1/payments/${id}`, undefined, accessTokenOverride);
     return {
       id: String(corpo.id),
       status: corpo.status,
@@ -140,6 +368,22 @@ export class MercadoPagoService {
       dataAprovacao: corpo.date_approved ?? null,
       dataCriacao: corpo.date_created,
     };
+  }
+
+  // Estorno total (sem `valorCentavos`) ou parcial (com) de um pagamento já
+  // aprovado — usado pela multa de não comparecimento (estorna 50%, mantém
+  // 50% com a barbearia). Estorno parcial só funciona dentro da janela que o
+  // Mercado Pago permite (normalmente até a liberação do valor) — se falhar,
+  // quem chamou deve tratar como "precisa resolver manualmente".
+  async estornarPagamento(paymentId: string, accessTokenOverride: string, valorCentavos?: number): Promise<void> {
+    await this.chamar(
+      `/v1/payments/${paymentId}/refunds`,
+      {
+        method: "POST",
+        body: valorCentavos != null ? JSON.stringify({ amount: Math.round(valorCentavos) / 100 }) : undefined,
+      },
+      accessTokenOverride,
+    );
   }
 
   // Confere a assinatura HMAC da notificação (header x-signature), usando o

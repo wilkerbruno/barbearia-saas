@@ -10,6 +10,7 @@ import { FuncionariosModule } from "./funcionarios/funcionarios.module";
 import { FinanceiroModule } from "./financeiro/financeiro.module";
 import { PlanosModule } from "./planos/planos.module";
 import { AssinaturasModule } from "./assinaturas/assinaturas.module";
+import { WebhooksModule } from "./webhooks/webhooks.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 
@@ -25,6 +26,7 @@ import { RolesGuard } from "./common/guards/roles.guard";
     FinanceiroModule,
     PlanosModule,
     AssinaturasModule,
+    WebhooksModule,
   ],
   providers: [
     // Ordem importa: primeiro autentica (JWT), depois checa o papel (@Roles).

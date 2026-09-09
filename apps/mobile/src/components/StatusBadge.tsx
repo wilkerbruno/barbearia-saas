@@ -8,6 +8,7 @@ const CONFIG: Record<StatusAgendamento, { label: string; bg: string; fg: string 
   [StatusAgendamento.CONFIRMADO]: { label: "Confirmado", bg: colors.accentSoft, fg: colors.accent },
   [StatusAgendamento.CONCLUIDO]: { label: "Concluído", bg: colors.surfaceAlt, fg: colors.inkMuted },
   [StatusAgendamento.CANCELADO]: { label: "Cancelado", bg: colors.dangerSoft, fg: colors.danger },
+  [StatusAgendamento.NAO_COMPARECEU]: { label: "Não compareceu", bg: colors.dangerSoft, fg: colors.danger },
 };
 
 export function StatusBadge({ status }: { status: StatusAgendamento }) {

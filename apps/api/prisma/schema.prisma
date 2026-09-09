@@ -25,6 +25,40 @@ enum StatusAgendamento {
   CONFIRMADO
   CONCLUIDO
   CANCELADO
+  // Cliente não apareceu no horário marcado (ver AgendamentosService.marcarNaoCompareceu).
+  // Diferente de CANCELADO: gera a multa de 50% (valorMultaCentavos) e entra
+  // no faturamento do Financeiro; CANCELADO não cobra nada.
+  NAO_COMPARECEU
+}
+
+// De onde veio o agendamento: pelo cliente no app (com pagamento) ou lançado
+// manualmente pela própria barbearia na agenda dela (atendimento presencial,
+// sem cobrança pelo app).
+enum OrigemAgendamento {
+  CLIENTE_APP
+  BARBEARIA_MANUAL
+}
+
+enum MetodoPagamento {
+  PIX
+  CARTAO
+}
+
+// Espelha (de forma simplificada) o status de pagamento do Mercado Pago.
+// Ver MercadoPagoService/PagamentosService para o mapeamento exato.
+enum StatusPagamento {
+  PENDENTE
+  APROVADO
+  RECUSADO
+  ESTORNADO
+  PARCIALMENTE_ESTORNADO
+}
+
+enum StatusAssinaturaPacote {
+  PENDENTE // cliente ainda não autorizou a cobrança recorrente no Mercado Pago
+  ATIVA
+  INADIMPLENTE
+  CANCELADA
 }
 
 enum StatusAssinatura {
@@ -65,13 +99,30 @@ model Barbearia {
   totalAvaliacoes Int   @default(0)
   criadoEm  DateTime @default(now())
 
+  // Conta Mercado Pago da PRÓPRIA barbearia (modelo marketplace/Connect): o
+  // cliente paga o serviço direto nessa conta, não na conta da Divisions
+  // Tech. Preenchido pelo fluxo de OAuth em BarbeariasMercadoPagoService —
+  // ver apps/api/.env.example (MERCADOPAGO_CLIENT_ID/SECRET) para como isso
+  // é configurado a nível de plataforma. accessToken/refreshToken nunca são
+  // expostos pela API (sempre selecionados explicitamente, nunca por um
+  // `include` genérico) — ver comentário em BarbeariasMercadoPagoService.
+  mercadoPagoAccessToken  String?  @db.Text
+  mercadoPagoRefreshToken String?  @db.Text
+  mercadoPagoUserId       String?
+  mercadoPagoPublicKey    String?
+  mercadoPagoTokenExpiraEm DateTime?
+  mercadoPagoConectadoEm  DateTime?
+
   usuarios     Usuario[]
   funcionarios Funcionario[]
   servicos     Servico[]
   pacotes      Pacote[]
+  pacotesMensais PacoteMensal[]
   agendamentos Agendamento[]
   assinatura   Assinatura?
   avaliacoes   Avaliacao[]
+  pagamentos   Pagamento[]
+  assinaturasPacote AssinaturaPacoteCliente[]
 }
 
 // ============================= USUÁRIOS =============================
@@ -95,6 +146,11 @@ model Usuario {
 
   // Avaliações (estrelas) feitas por este usuário quando papel = CLIENTE
   avaliacoes Avaliacao[]
+
+  // Pagamentos feitos por este usuário quando papel = CLIENTE (de agendamentos
+  // avulsos ou de mensalidades de pacote).
+  pagamentos Pagamento[]
+  assinaturasPacote AssinaturaPacoteCliente[]
 
   @@index([barbeariaId])
 }
@@ -167,6 +223,7 @@ model Servico {
 
   agendamentos      Agendamento[]
   pacotesQueIncluem PacoteServico[]
+  pacotesMensaisQueIncluem PacoteMensalServico[]
 
   @@index([barbeariaId])
 }
@@ -202,8 +259,13 @@ model Agendamento {
   id            String            @id @default(uuid())
   barbeariaId   String
   barbearia     Barbearia         @relation(fields: [barbeariaId], references: [id])
-  clienteId     String
-  cliente       Usuario           @relation("AgendamentosCliente", fields: [clienteId], references: [id])
+  // Opcional: um agendamento lançado manualmente pela barbearia (ver
+  // OrigemAgendamento) pode ser de um cliente avulso, sem conta no app —
+  // nesse caso clienteId fica nulo e clienteAvulsoNome/Telefone são usados.
+  clienteId     String?
+  cliente       Usuario?          @relation("AgendamentosCliente", fields: [clienteId], references: [id])
+  clienteAvulsoNome     String?
+  clienteAvulsoTelefone String?
   funcionarioId String
   funcionario   Funcionario       @relation("AgendamentosFuncionario", fields: [funcionarioId], references: [id])
   servicoId     String?
@@ -214,6 +276,7 @@ model Agendamento {
   fim           DateTime
   precoCentavos Int
   status        StatusAgendamento @default(CONFIRMADO)
+  origem        OrigemAgendamento @default(CLIENTE_APP)
   criadoEm      DateTime          @default(now())
   // Agrupa vários serviços marcados juntos no mesmo "carrinho" (ex: corte +
   // barba, ou pai e filho no mesmo horário) — cada serviço continua sendo uma
@@ -221,10 +284,59 @@ model Agendamento {
   // o cancelamento tratam o grupo como um agendamento só (ver AgendamentosService).
   grupoId       String?
 
+  // Preenchido quando o cliente usou a cota do pacote mensal pra esse
+  // horário em vez de pagar avulso (ver PacotesMensaisService) — nesse caso
+  // não existe Pagamento vinculado a este agendamento.
+  assinaturaPacoteId String?
+  assinaturaPacote   AssinaturaPacoteCliente? @relation(fields: [assinaturaPacoteId], references: [id])
+
+  // Cobrança avulsa deste agendamento (Pix/Cartão), quando não veio de um
+  // pacote mensal nem foi lançado manualmente pela barbearia.
+  pagamento Pagamento?
+
+  // Preenchido só quando status = NAO_COMPARECEU: os 50% retidos como multa
+  // (o resto é estornado ao cliente — ver AgendamentosService.marcarNaoCompareceu).
+  // Contabilizado pelo Financeiro junto com os CONCLUIDO.
+  valorMultaCentavos Int?
+
   @@index([barbeariaId, inicio])
   @@index([funcionarioId, inicio])
   @@index([clienteId])
   @@index([grupoId])
+  @@index([assinaturaPacoteId])
+}
+
+// ============================= PAGAMENTOS DO CLIENTE =============================
+
+// Cobrança de um cliente pra barbearia por UM agendamento avulso (não
+// vinculado a pacote mensal) — Pix ou Cartão, sempre na conta Mercado Pago da
+// própria barbearia (ver Barbearia.mercadoPagoAccessToken). Assinaturas de
+// pacote mensal usam AssinaturaPacoteCliente/preapproval, não este model.
+model Pagamento {
+  id            String   @id @default(uuid())
+  agendamentoId String?  @unique
+  agendamento   Agendamento? @relation(fields: [agendamentoId], references: [id])
+  clienteId     String
+  cliente       Usuario  @relation(fields: [clienteId], references: [id])
+  barbeariaId   String
+  barbearia     Barbearia @relation(fields: [barbeariaId], references: [id])
+  metodo        MetodoPagamento
+  status        StatusPagamento @default(PENDENTE)
+  valorCentavos Int
+  valorEstornadoCentavos Int @default(0)
+  // id do pagamento no Mercado Pago (para Pix: o /v1/payments criado; para
+  // Cartão via Checkout Pro: o payment aprovado associado à preference).
+  gatewayPagamentoId String?
+  gatewayPreferenceId String?
+  // Pix: QR code pra exibir (imagem base64) e o "copia e cola" (texto).
+  pixQrCodeBase64 String? @db.LongText
+  pixCopiaECola   String? @db.Text
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
+
+  @@index([clienteId])
+  @@index([barbeariaId])
+  @@index([gatewayPagamentoId])
 }
 
 // ============================= AVALIAÇÕES (ESTRELAS) =============================
@@ -245,6 +357,73 @@ model Avaliacao {
 
   @@unique([barbeariaId, clienteId])
   @@index([barbeariaId])
+}
+
+// ============================= PACOTES MENSAIS (assinatura do cliente na barbearia) =============================
+//
+// Diferente de "Pacote" (acima): aquele é um combo pago uma vez (ex: corte +
+// barba por R$50). Este é uma assinatura recorrente mensal — o cliente paga
+// todo mês e pode usar os serviços incluídos um número limitado de vezes por
+// semana, só nos dias que a barbearia permitir (ver PacotesMensaisService
+// pra como a cota semanal e os dias permitidos são conferidos no momento de
+// agendar).
+
+model PacoteMensal {
+  id             String   @id @default(uuid())
+  barbeariaId    String
+  barbearia      Barbearia @relation(fields: [barbeariaId], references: [id])
+  nome           String
+  descricao      String?  @db.Text
+  precoCentavos  Int
+  // Quantas vezes por semana o cliente pode usar os serviços do pacote.
+  vezesPorSemana Int
+  // Dias da semana em que dá pra agendar usando o pacote — 0=domingo ...
+  // 6=sábado (igual Date.getDay()), guardado como JSON (MySQL não tem array
+  // nativo, mesmo caso de HorarioTrabalho). Ex: [2,4,6] = terça/quinta/sábado.
+  diasSemanaPermitidos Json
+  ativo          Boolean  @default(true)
+  criadoEm       DateTime @default(now())
+
+  servicos    PacoteMensalServico[]
+  assinaturas AssinaturaPacoteCliente[]
+
+  @@index([barbeariaId])
+}
+
+// Relação N:N entre PacoteMensal e Servico (mesmo padrão de PacoteServico).
+model PacoteMensalServico {
+  pacoteMensalId String
+  pacoteMensal   PacoteMensal @relation(fields: [pacoteMensalId], references: [id], onDelete: Cascade)
+  servicoId      String
+  servico        Servico      @relation(fields: [servicoId], references: [id])
+
+  @@id([pacoteMensalId, servicoId])
+}
+
+// Assinatura de UM cliente a UM pacote mensal de UMA barbearia — cobrada via
+// Mercado Pago "Preapproval" (recorrente, cartão salvo) na conta da própria
+// barbearia, igual ao padrão já usado pra assinatura SaaS (ver
+// MercadoPagoService), só que aqui quem paga é o cliente final, não o dono
+// da barbearia.
+model AssinaturaPacoteCliente {
+  id                  String   @id @default(uuid())
+  pacoteMensalId      String
+  pacoteMensal        PacoteMensal @relation(fields: [pacoteMensalId], references: [id])
+  clienteId           String
+  cliente             Usuario  @relation(fields: [clienteId], references: [id])
+  barbeariaId         String
+  barbearia           Barbearia @relation(fields: [barbeariaId], references: [id])
+  status              StatusAssinaturaPacote @default(PENDENTE)
+  inicioEm            DateTime @default(now())
+  proximaCobrancaEm   DateTime?
+  gatewayAssinaturaId String? // id da preapproval no Mercado Pago
+  criadoEm            DateTime @default(now())
+
+  agendamentos Agendamento[]
+
+  @@unique([pacoteMensalId, clienteId])
+  @@index([barbeariaId])
+  @@index([clienteId])
 }
 
 // ============================= PLANOS E ASSINATURA (SAAS) =============================

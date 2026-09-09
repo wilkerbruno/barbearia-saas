@@ -1,0 +1,118 @@
+import { Injectable, Logger } from "@nestjs/common";
+import { StatusAgendamento, StatusPagamento } from "@barbearia-saas/shared";
+import { PrismaService } from "../prisma/prisma.service";
+import { MercadoPagoService } from "../pagamentos/mercadopago.service";
+import { AssinaturasService } from "../assinaturas/assinaturas.service";
+
+// Mapeia o status devolvido pelo Mercado Pago pro nosso StatusPagamento.
+function mapearStatusPagamento(status: string | null | undefined): StatusPagamento {
+  if (status === "approved") return StatusPagamento.APROVADO;
+  if (status === "pending" || status === "in_process" || status === "authorized") return StatusPagamento.PENDENTE;
+  return StatusPagamento.RECUSADO; // rejected, cancelled, etc.
+}
+
+// Ponto ÚNICO de entrada de todas as notificações do Mercado Pago (ver
+// WebhooksController) — sua aplicação só pode configurar UMA URL de webhook
+// no painel, então esse service decide pra qual fluxo cada notificação
+// pertence e delega:
+//
+// - Evento numa conta CONECTADA (barbearia, via OAuth — reconhecida pelo
+//   `user_id` do payload batendo com Barbearia.mercadoPagoUserId): pagamento
+//   avulso de agendamento, ou (futuramente) assinatura de pacote mensal.
+// - Qualquer outro evento: assinatura SaaS da barbearia com a Divisions Tech
+//   (fluxo antigo, inalterado — ver AssinaturasService.processarEventoPagamento).
+@Injectable()
+export class WebhooksService {
+  private readonly logger = new Logger(WebhooksService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private mercadoPago: MercadoPagoService,
+    private assinaturasService: AssinaturasService,
+  ) {}
+
+  async processarEventoPagamento(payload: any, query: Record<string, any>, headers: Record<string, any>) {
+    const tipo = payload?.type ?? payload?.topic ?? query?.type ?? query?.topic;
+    const dataId = payload?.data?.id ?? query?.["data.id"] ?? query?.id;
+    if (!tipo || !dataId) return { recebido: true };
+
+    const assinaturaValida = this.mercadoPago.validarAssinaturaWebhook({
+      xSignature: headers["x-signature"],
+      xRequestId: headers["x-request-id"],
+      dataId: String(dataId),
+    });
+    if (!assinaturaValida) {
+      this.logger.warn(`Webhook do Mercado Pago com assinatura inválida (tipo=${tipo}, id=${dataId}) — ignorado.`);
+      return { recebido: true };
+    }
+
+    // user_id = conta do Mercado Pago onde o evento aconteceu. Se bater com
+    // uma barbearia conectada, é um evento de marketplace (cliente pagando a
+    // barbearia); senão, é a assinatura SaaS (conta da própria plataforma).
+    const mpUserId = payload?.user_id != null ? String(payload.user_id) : null;
+    const barbearia = mpUserId
+      ? await this.prisma.barbearia.findFirst({ where: { mercadoPagoUserId: mpUserId } })
+      : null;
+
+    try {
+      if (barbearia) {
+        await this.processarEventoMarketplace(tipo, String(dataId), barbearia.id);
+      } else if (tipo === "subscription_preapproval" || tipo === "preapproval") {
+        await this.assinaturasService.processarEventoPagamento(payload, query, headers);
+      } else if (tipo === "subscription_authorized_payment") {
+        await this.assinaturasService.processarEventoPagamento(payload, query, headers);
+      } else if (tipo === "payment") {
+        await this.assinaturasService.processarEventoPagamento(payload, query, headers);
+      }
+    } catch (e) {
+      // Nunca deixa estourar pro Mercado Pago ficar reenviando pra sempre por
+      // causa de um formato de payload que ainda não previmos.
+      this.logger.error(`Erro ao processar webhook do Mercado Pago (tipo=${tipo}, id=${dataId}): ${e}`);
+    }
+
+    return { recebido: true };
+  }
+
+  private async processarEventoMarketplace(tipo: string, dataId: string, barbeariaId: string) {
+    if (tipo === "payment") {
+      await this.tratarPagamentoAgendamento(dataId, barbeariaId);
+      return;
+    }
+    if (tipo === "subscription_preapproval" || tipo === "preapproval" || tipo === "subscription_authorized_payment") {
+      // Assinatura de pacote mensal (cliente pagando a barbearia todo mês) —
+      // ver PacotesMensaisService (adicionado numa etapa seguinte).
+      this.logger.warn(`Webhook de assinatura de pacote mensal (tipo=${tipo}, id=${dataId}) recebido, mas ainda não implementado.`);
+      return;
+    }
+  }
+
+  // "agendamento:<pagamentoId>" — ver como AgendamentosService monta o
+  // external_reference ao criar a cobrança Pix/Cartão.
+  private async tratarPagamentoAgendamento(paymentId: string, barbeariaId: string) {
+    const token = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
+    const pagamentoMp = await this.mercadoPago.buscarPayment(paymentId, token);
+    const [prefixo, pagamentoId] = (pagamentoMp.externalReference ?? "").split(":");
+    if (prefixo !== "agendamento" || !pagamentoId) return;
+
+    const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
+    if (!pagamento) {
+      this.logger.warn(`Pagamento ${pagamentoId} (do external_reference) não encontrado — webhook ignorado.`);
+      return;
+    }
+    // Idempotência: já processamos essa aprovação antes, nada a fazer.
+    if (pagamento.status === StatusPagamento.APROVADO && pagamento.gatewayPagamentoId === paymentId) return;
+
+    const novoStatus = mapearStatusPagamento(pagamentoMp.status);
+    await this.prisma.pagamento.update({
+      where: { id: pagamentoId },
+      data: { status: novoStatus, gatewayPagamentoId: paymentId },
+    });
+
+    if (novoStatus === StatusPagamento.APROVADO && pagamento.agendamentoId) {
+      await this.prisma.agendamento.updateMany({
+        where: { id: pagamento.agendamentoId, status: StatusAgendamento.PENDENTE },
+        data: { status: StatusAgendamento.CONFIRMADO },
+      });
+    }
+  }
+}
