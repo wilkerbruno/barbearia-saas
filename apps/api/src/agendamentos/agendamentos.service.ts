@@ -153,7 +153,13 @@ export class AgendamentosService {
           {
             valorCentavos: valorTotalCentavos,
             descricao: `Agendamento - ${barbearia?.nome ?? "Barbearia"}`,
-            externalReference: `agendamento:${pagamento.id}`,
+            // "_" (não ":") — a Orders API (usada pelo cartão, ver
+            // MercadoPagoService.criarPagamentoCartao) valida external_reference
+            // com um padrão mais restrito que a API clássica e rejeita ":"
+            // ("does not match pattern", constatado em produção). Pix também
+            // foi trocado pro mesmo formato só por consistência (não precisa,
+            // mas evita ter dois padrões diferentes pro mesmo campo).
+            externalReference: `agendamento_${pagamento.id}`,
             payerEmail: cliente.email,
           },
           tokenBarbearia,
@@ -182,7 +188,13 @@ export class AgendamentosService {
           {
             valorCentavos: valorTotalCentavos,
             descricao: `Agendamento - ${barbearia?.nome ?? "Barbearia"}`,
-            externalReference: `agendamento:${pagamento.id}`,
+            // "_" (não ":") — a Orders API (usada pelo cartão, ver
+            // MercadoPagoService.criarPagamentoCartao) valida external_reference
+            // com um padrão mais restrito que a API clássica e rejeita ":"
+            // ("does not match pattern", constatado em produção). Pix também
+            // foi trocado pro mesmo formato só por consistência (não precisa,
+            // mas evita ter dois padrões diferentes pro mesmo campo).
+            externalReference: `agendamento_${pagamento.id}`,
             token: dto.cartaoToken,
             paymentMethodId,
             payerEmail: cliente.email,

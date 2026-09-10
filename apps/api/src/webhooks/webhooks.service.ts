@@ -139,12 +139,15 @@ export class WebhooksService {
       });
   }
 
-  // "agendamento:<pagamentoId>" — ver como AgendamentosService monta o
-  // external_reference ao criar a cobrança Pix/Cartão.
+  // "agendamento_<pagamentoId>" — ver como AgendamentosService monta o
+  // external_reference ao criar a cobrança Pix/Cartão. Separador é "_", não
+  // ":" (a Orders API, usada pelo cartão, rejeita ":" nesse campo — ver
+  // AgendamentosService); o pagamentoId é um uuid (só hexadecimal e "-"),
+  // então dividir por "_" continua seguro e sempre dá exatamente 2 partes.
   private async tratarPagamentoAgendamento(paymentId: string, barbeariaId: string) {
     const token = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
     const pagamentoMp = await this.mercadoPago.buscarPayment(paymentId, token);
-    const [prefixo, pagamentoId] = (pagamentoMp.externalReference ?? "").split(":");
+    const [prefixo, pagamentoId] = (pagamentoMp.externalReference ?? "").split("_");
     if (prefixo !== "agendamento" || !pagamentoId) return;
 
     const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
