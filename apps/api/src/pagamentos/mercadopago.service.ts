@@ -391,24 +391,6 @@ export class MercadoPagoService {
       resultados.find((r) => r.status === "active") ??
       resultados[0];
 
-    // DEBUG TEMPORÁRIO: identificar a bandeira (BIN) vem passando, mas o
-    // Mercado Pago segue recusando a cobrança com "Invalid payment_method_id"
-    // (erro 3028) — hipótese: a conta conectada dessa barbearia ainda não tem
-    // cartão habilitado como meio de RECEBIMENTO (Pix funciona à parte). Esse
-    // log lista os métodos que essa conta realmente aceita, pra confirmar.
-    // Nunca deixa a reserva cair por causa disso (só loga, envolto em try/catch).
-    try {
-      const metodosDaConta: any = await this.chamar("/v1/payment_methods", undefined, accessTokenOverride);
-      const resumo = (Array.isArray(metodosDaConta) ? metodosDaConta : []).map((m: any) => ({
-        id: m.id,
-        tipo: m.payment_type_id,
-        status: m.status,
-      }));
-      this.logger.warn(`[DEBUG cartão] bandeira identificada="${encontrado?.id}" | métodos habilitados na conta da barbearia: ${JSON.stringify(resumo)}`);
-    } catch (e) {
-      this.logger.warn(`[DEBUG cartão] falha ao listar métodos habilitados da conta da barbearia: ${e}`);
-    }
-
     if (!encontrado?.id) {
       throw new BadRequestException("Não foi possível identificar a bandeira desse cartão. Confira o número digitado.");
     }
@@ -433,40 +415,82 @@ export class MercadoPagoService {
     },
     accessTokenOverride: string,
   ): Promise<CartaoPagamentoCriado> {
-    // Modelo marketplace/split: o cartão foi tokenizado com a chave PÚBLICA
-    // DA PLATAFORMA (ver CartaoScreen/publicKeyPlataforma), mas quem cobra
-    // aqui é o access_token DA BARBEARIA (accessTokenOverride, obtido via
-    // OAuth) — combinação diferente de aplicação/conta. Pra esse modelo, o
-    // Mercado Pago EXIGE `application_fee` maior que zero (testado em
-    // produção: mandar 0 dá erro "application_fee attribute must be
-    // positive", e não mandar dá "Invalid payment_method_id" mesmo com a
-    // bandeira certa e habilitada na conta). Esse valor é a comissão da
-    // Divisions Tech, descontada automaticamente do valor que cai pra
-    // barbearia — 1% do valor da cobrança, com mínimo de 1 centavo pra nunca
-    // virar zero em cobranças bem pequenas.
-    const taxaPlataformaCentavos = Math.max(1, Math.round(params.valorCentavos * 0.01));
+    // HISTÓRICO DE INVESTIGAÇÃO (cartão recusado com "Invalid
+    // payment_method_id", código 3028, mesmo com bandeira certa e habilitada
+    // na conta — ver logs de produção) — essa função chamava a API CLÁSSICA
+    // de Payments (POST /v1/payments), mas a aplicação do Mercado Pago dessa
+    // conta foi provisionada especificamente pra "API Orders" (confirmado em
+    // Suas integrações > [aplicação] > Detalhes > "API integrada: API
+    // Orders"). Chamar a API clássica numa aplicação assim é o que causava
+    // esse erro — e, ao tentar contornar com `application_fee` (outra
+    // hipótese testada), veio "application_fee attribute must be positive"
+    // e depois "You cannot use application_fee with this payment" (a
+    // aplicação não está habilitada pra marketplace/split, então nem esse
+    // caminho serve). A correção é usar a Orders API mesmo (POST
+    // /v1/orders), que é o que essa aplicação realmente espera — ver
+    // interpretarOrder/buscarOrderComoPayment abaixo pra como o retorno dela
+    // é traduzido pro mesmo vocabulário ("approved"/"pending"/"rejected")
+    // que o resto do código (ex: AgendamentosService) já usa.
+    const valorFormatado = (Math.round(params.valorCentavos) / 100).toFixed(2);
     const corpo: any = await this.chamar(
-      "/v1/payments",
+      "/v1/orders",
       {
         method: "POST",
         headers: { "X-Idempotency-Key": crypto.randomUUID() },
         body: JSON.stringify({
-          transaction_amount: Math.round(params.valorCentavos) / 100,
-          description: params.descricao,
-          token: params.token,
-          installments: 1,
-          payment_method_id: params.paymentMethodId,
+          type: "online",
+          processing_mode: "automatic",
+          total_amount: valorFormatado,
           external_reference: params.externalReference,
-          application_fee: taxaPlataformaCentavos / 100,
           payer: {
             email: params.payerEmail,
             identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
+          },
+          transactions: {
+            payments: [
+              {
+                amount: valorFormatado,
+                payment_method: {
+                  id: params.paymentMethodId,
+                  type: "credit_card",
+                  token: params.token,
+                  installments: 1,
+                },
+              },
+            ],
           },
         }),
       },
       accessTokenOverride,
     );
-    return { id: String(corpo.id), status: corpo.status, statusDetail: corpo.status_detail ?? null };
+    const { status, statusDetail } = this.interpretarOrder(corpo);
+    // Guarda o id da ORDER (prefixo "ORD...", não o id do pagamento aninhado
+    // dentro dela) — é esse id que fica salvo em Pagamento.gatewayPagamentoId
+    // e usado depois em buscarPayment/estornarPagamento, que reconhecem esse
+    // prefixo pra saber que devem usar a Orders API em vez da API clássica.
+    return { id: String(corpo.id), status, statusDetail };
+  }
+
+  // Traduz o status de uma Order (API nova, usada pelo cartão — ver
+  // criarPagamentoCartao) pro vocabulário clássico "approved"/"pending"/
+  // "rejected" que o resto do código já espera (CartaoPagamentoCriado,
+  // PaymentDetalhe). Lê o status da PRIMEIRA transação da Order — a única
+  // que essa integração cria por Order — porque é lá que vem o motivo
+  // específico de recusa (ex: "cc_rejected_insufficient_amount", igual à API
+  // clássica) que traduzirMotivoRecusaCartao usa; o status da Order em si é
+  // mais genérico. Tabela oficial: Checkout Transparente via Orders >
+  // Payment management > Status > Transaction status.
+  private interpretarOrder(corpo: any): { status: "approved" | "pending" | "rejected"; statusDetail: string | null; transacao: any } {
+    const transacao = corpo?.transactions?.payments?.[0];
+    const statusBruto = transacao?.status ?? corpo?.status;
+    const statusDetail = transacao?.status_detail ?? corpo?.status_detail ?? null;
+    const status: "approved" | "pending" | "rejected" =
+      statusBruto === "processed" && (statusDetail === "accredited" || statusDetail === "partially_refunded")
+        ? "approved"
+        : ["created", "processing", "action_required", "in_review"].includes(statusBruto)
+          ? "pending"
+          : "rejected"; // failed, charged_back, refunded, expired, canceled
+    return { status, statusDetail, transacao };
   }
 
   // Cria uma preference do Checkout Pro (página de pagamento hospedada pelo
@@ -504,7 +528,15 @@ export class MercadoPagoService {
     return { id: String(corpo.id), initPoint: corpo.init_point };
   }
 
+  // Ids de Order (cartão — ver criarPagamentoCartao) sempre vêm com o
+  // prefixo "ORD" do próprio Mercado Pago, o que basta pra distinguir de um
+  // id de payment clássico (Pix) sem precisar guardar mais nada no banco.
+  private ehIdDeOrder(id: string): boolean {
+    return id.startsWith("ORD");
+  }
+
   async buscarPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
+    if (this.ehIdDeOrder(id)) return this.buscarOrderComoPayment(id, accessTokenOverride);
     const corpo: any = await this.chamar(`/v1/payments/${id}`, undefined, accessTokenOverride);
     return {
       id: String(corpo.id),
@@ -517,12 +549,53 @@ export class MercadoPagoService {
     };
   }
 
+  // Consulta uma Order (GET /v1/orders/:id) e devolve no mesmo formato
+  // PaymentDetalhe que o resto do código (poll em AgendamentosService,
+  // webhook em WebhooksService) já sabe interpretar — nenhum dos dois
+  // precisou mudar por causa da Orders API graças a essa tradução ficar
+  // isolada aqui.
+  private async buscarOrderComoPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
+    const corpo: any = await this.chamar(`/v1/orders/${id}`, undefined, accessTokenOverride);
+    const { status, transacao } = this.interpretarOrder(corpo);
+    return {
+      id: String(corpo.id),
+      status,
+      externalReference: corpo.external_reference != null ? String(corpo.external_reference) : null,
+      transactionAmountCentavos: Math.round(Number(corpo.total_amount ?? 0) * 100),
+      metodoPagamento: transacao?.payment_method?.id ?? null,
+      dataAprovacao: status === "approved" ? (corpo.last_updated_date ?? null) : null,
+      dataCriacao: corpo.created_date,
+    };
+  }
+
   // Estorno total (sem `valorCentavos`) ou parcial (com) de um pagamento já
   // aprovado — usado pela multa de não comparecimento (estorna 50%, mantém
   // 50% com a barbearia). Estorno parcial só funciona dentro da janela que o
   // Mercado Pago permite (normalmente até a liberação do valor) — se falhar,
   // quem chamou deve tratar como "precisa resolver manualmente".
   async estornarPagamento(paymentId: string, accessTokenOverride: string, valorCentavos?: number): Promise<void> {
+    if (this.ehIdDeOrder(paymentId)) {
+      // Orders API: /v1/orders/:id/refund. Estorno parcial exige o
+      // `transaction_id` do pagamento aninhado dentro da Order (prefixo
+      // "PAY...") — precisa buscar a Order primeiro pra pegar esse id;
+      // estorno total é só um corpo vazio.
+      let transactionId: string | undefined;
+      if (valorCentavos != null) {
+        const order: any = await this.chamar(`/v1/orders/${paymentId}`, undefined, accessTokenOverride);
+        transactionId = order?.transactions?.payments?.[0]?.id;
+      }
+      await this.chamar(
+        `/v1/orders/${paymentId}/refund`,
+        {
+          method: "POST",
+          body: JSON.stringify(
+            valorCentavos != null ? { amount: Math.round(valorCentavos) / 100, transaction_id: transactionId } : {},
+          ),
+        },
+        accessTokenOverride,
+      );
+      return;
+    }
     await this.chamar(
       `/v1/payments/${paymentId}/refunds`,
       {

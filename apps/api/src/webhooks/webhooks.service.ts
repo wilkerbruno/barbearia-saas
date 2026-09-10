@@ -74,7 +74,13 @@ export class WebhooksService {
   }
 
   private async processarEventoMarketplace(tipo: string, dataId: string, barbeariaId: string) {
-    if (tipo === "payment") {
+    // "order" é o evento da Orders API (cartão — ver
+    // MercadoPagoService.criarPagamentoCartao/buscarPayment, que já sabe
+    // reconhecer um id de Order pelo prefixo "ORD" e traduzir sozinho);
+    // "payment" continua sendo o evento do Pix (API clássica). Mesma rota
+    // pros dois porque tratarPagamentoAgendamento chama buscarPayment, que
+    // decide sozinho qual API consultar.
+    if (tipo === "payment" || tipo === "order") {
       await this.tratarPagamentoAgendamento(dataId, barbeariaId);
       return;
     }
