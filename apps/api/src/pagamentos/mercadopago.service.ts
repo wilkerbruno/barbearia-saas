@@ -433,6 +433,18 @@ export class MercadoPagoService {
     },
     accessTokenOverride: string,
   ): Promise<CartaoPagamentoCriado> {
+    // Modelo marketplace/split: o cartão foi tokenizado com a chave PÚBLICA
+    // DA PLATAFORMA (ver CartaoScreen/publicKeyPlataforma), mas quem cobra
+    // aqui é o access_token DA BARBEARIA (accessTokenOverride, obtido via
+    // OAuth) — combinação diferente de aplicação/conta. Pra esse modelo, o
+    // Mercado Pago EXIGE `application_fee` maior que zero (testado em
+    // produção: mandar 0 dá erro "application_fee attribute must be
+    // positive", e não mandar dá "Invalid payment_method_id" mesmo com a
+    // bandeira certa e habilitada na conta). Esse valor é a comissão da
+    // Divisions Tech, descontada automaticamente do valor que cai pra
+    // barbearia — 1% do valor da cobrança, com mínimo de 1 centavo pra nunca
+    // virar zero em cobranças bem pequenas.
+    const taxaPlataformaCentavos = Math.max(1, Math.round(params.valorCentavos * 0.01));
     const corpo: any = await this.chamar(
       "/v1/payments",
       {
@@ -445,18 +457,7 @@ export class MercadoPagoService {
           installments: 1,
           payment_method_id: params.paymentMethodId,
           external_reference: params.externalReference,
-          // Modelo marketplace/split: o cartão foi tokenizado com a chave
-          // PÚBLICA DA PLATAFORMA (ver CartaoScreen/publicKeyPlataforma), mas
-          // quem cobra aqui é o access_token DA BARBEARIA (accessTokenOverride,
-          // obtido via OAuth) — combinação diferente de aplicação/conta. A
-          // documentação oficial do Mercado Pago pra Split de Pagamentos
-          // (checkout transparente em marketplace) exige o campo
-          // `application_fee` nessa combinação — sem ele, o Mercado Pago
-          // recusava com "Invalid payment_method_id" mesmo com a bandeira
-          // certa e habilitada na conta (confirmado nos logs de produção).
-          // Como a Divisions Tech não cobra comissão em cima do agendamento,
-          // manda 0.
-          application_fee: 0,
+          application_fee: taxaPlataformaCentavos / 100,
           payer: {
             email: params.payerEmail,
             identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
