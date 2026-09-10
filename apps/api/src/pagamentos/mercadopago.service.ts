@@ -379,7 +379,17 @@ export class MercadoPagoService {
     if (this.publicKeyPlataforma) query.set("public_key", this.publicKeyPlataforma);
     const corpo: any = await this.chamar(`/v1/payment_methods/search?${query.toString()}`, undefined, accessTokenOverride);
     const resultados: any[] = Array.isArray(corpo) ? corpo : (corpo?.results ?? []);
-    const encontrado = resultados[0];
+    // O mesmo BIN às vezes casa com MAIS de um resultado — ex: "visa"
+    // (crédito) e "debvisa" (débito) — porque o Mercado Pago não consegue
+    // saber só pelo BIN qual é. Como só cobramos à vista e não implementamos
+    // o fluxo extra de autenticação que cartão de DÉBITO exige por essa API,
+    // sempre preferimos a versão de CRÉDITO explicitamente; pegar sempre o
+    // primeiro resultado (às vezes vem o de débito primeiro) fazia o
+    // Mercado Pago recusar a cobrança com "Invalid payment_method_id".
+    const encontrado =
+      resultados.find((r) => r.payment_type_id === "credit_card" && r.status === "active") ??
+      resultados.find((r) => r.status === "active") ??
+      resultados[0];
     if (!encontrado?.id) {
       throw new BadRequestException("Não foi possível identificar a bandeira desse cartão. Confira o número digitado.");
     }
