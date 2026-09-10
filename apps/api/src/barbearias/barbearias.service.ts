@@ -2,15 +2,17 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import sharp from "sharp";
 import { StatusAgendamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
+import { MercadoPagoService } from "../pagamentos/mercadopago.service";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
 import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
 
 // Campos seguros para expor sem autenticação (busca de proximidade, tela
 // pública "sobre a barbearia" etc). Nunca inclua e-mail/telefone de usuários
 // nem dados de assinatura/faturamento aqui. mercadoPagoPublicKey é a chave
-// PÚBLICA da conta Mercado Pago da barbearia — ao contrário do access
-// token, é seguro expor ao app do cliente (é o que o app usa pra tokenizar
-// o cartão direto no aparelho, ver CartaoScreen).
+// PÚBLICA usada pra tokenizar cartão direto no aparelho do cliente (ver
+// CartaoScreen) — ao contrário do access token, é seguro expor. Vem do banco
+// só por compatibilidade; na prática quase sempre é substituída pela chave
+// da própria aplicação (ver comChavePublicaResolvida abaixo).
 const SELECT_PUBLICO = {
   id: true,
   nome: true,
@@ -29,7 +31,19 @@ const TAMANHO_MAXIMO_LOGO_BYTES = 5 * 1024 * 1024; // 5MB
 
 @Injectable()
 export class BarbeariasService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private mercadoPago: MercadoPagoService,
+  ) {}
+
+  // O Mercado Pago nem sempre devolve a public_key da conta conectada no
+  // OAuth (ver MercadoPagoService.trocarCodigoPorToken) — como a tokenização
+  // de cartão não depende de quem vai receber o dinheiro, cai pra chave da
+  // própria aplicação (MERCADOPAGO_PUBLIC_KEY) sempre que a da barbearia não
+  // veio, em vez de deixar o cliente sem poder pagar com cartão.
+  private comChavePublicaResolvida<T extends { mercadoPagoPublicKey: string | null }>(barbearia: T): T {
+    return { ...barbearia, mercadoPagoPublicKey: barbearia.mercadoPagoPublicKey ?? this.mercadoPago.publicKeyPlataforma };
+  }
 
   // Usado pelo painel SaaS (SAAS_ADMIN) para listar todas as barbearias assinantes.
   listarTodas() {
@@ -55,7 +69,7 @@ export class BarbeariasService {
   async buscarInfoPublica(id: string) {
     const barbearia = await this.prisma.barbearia.findUnique({ where: { id }, select: SELECT_PUBLICO });
     if (!barbearia) throw new NotFoundException("Barbearia não encontrada.");
-    return barbearia;
+    return this.comChavePublicaResolvida(barbearia);
   }
 
   atualizar(id: string, dto: UpdateBarbeariaDto) {
@@ -135,7 +149,7 @@ export class BarbeariasService {
 
     return candidatas
       .map((barbearia) => ({
-        ...barbearia,
+        ...this.comChavePublicaResolvida(barbearia),
         distanciaKm: distanciaHaversineKm(latitude, longitude, barbearia.latitude!, barbearia.longitude!),
         jaAgendou: idsJaAgendados.has(barbearia.id),
       }))
@@ -173,7 +187,7 @@ export class BarbeariasService {
       _count: { nota: true },
     });
 
-    return this.prisma.barbearia.update({
+    const atualizada = await this.prisma.barbearia.update({
       where: { id: barbeariaId },
       data: {
         notaMedia: agregado._avg.nota ?? 0,
@@ -181,6 +195,7 @@ export class BarbeariasService {
       },
       select: SELECT_PUBLICO,
     });
+    return this.comChavePublicaResolvida(atualizada);
   }
 
   // Lista as avaliações (com comentário) de uma barbearia, mais recentes primeiro.

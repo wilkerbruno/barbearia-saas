@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -55,6 +55,41 @@ export function PagamentoScreen({ route, navigation }: Props) {
     const id = setInterval(consultar, INTERVALO_POLL_MS);
     return () => clearInterval(id);
   }, [pagamento.status, consultar]);
+
+  // Sair dessa tela (seta de voltar, botão físico do Android etc.) enquanto o
+  // pagamento ainda está PENDENTE não pode simplesmente abandonar o
+  // agendamento reservado — sem isso, o horário ficava "preso" (parecendo
+  // agendado) até expirar sozinho (ver PENDENTE_EXPIRA_MINUTOS no backend).
+  // "beforeRemove" pega qualquer forma de sair da tela, não só o botão do
+  // header, e só o pagamento ainda PENDENTE precisa dessa confirmação.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("beforeRemove", (e) => {
+      if (pagamento.status !== StatusPagamento.PENDENTE) return;
+      e.preventDefault();
+      Alert.alert(
+        "Sair sem pagar?",
+        "Se você sair agora, o horário reservado será liberado e o agendamento não será confirmado.",
+        [
+          { text: "Continuar pagando", style: "cancel" },
+          {
+            text: "Sair e cancelar",
+            style: "destructive",
+            onPress: async () => {
+              try {
+                await api.patch(`/agendamentos/pagamentos/${pagamento.id}/cancelar`);
+              } catch {
+                // Mesmo se a chamada falhar (ex: sem internet), deixa sair —
+                // o PENDENTE expira sozinho depois de um tempo de qualquer forma.
+              }
+              navigation.dispatch(e.data.action);
+            },
+          },
+        ],
+      );
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation, pagamento.status, pagamento.id]);
 
   async function copiarCodigoPix() {
     if (!pagamento.pixCopiaECola) return;

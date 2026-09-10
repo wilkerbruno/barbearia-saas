@@ -49,6 +49,17 @@ export class AgendamentosController {
     return this.agendamentosService.buscarPagamento(id, user.id);
   }
 
+  // Cliente desiste de pagar (ex: voltou da tela de pagamento sem concluir) —
+  // libera o horário na hora em vez de deixar preso até PENDENTE_EXPIRA_MINUTOS
+  // vencer sozinho. Só tem efeito enquanto ainda está PENDENTE; se já
+  // aprovou/recusou nesse meio tempo, não desfaz nada (ver
+  // AgendamentosService.cancelarPagamentoPendente).
+  @Roles(Papel.CLIENTE)
+  @Patch("pagamentos/:id/cancelar")
+  cancelarPagamento(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.agendamentosService.cancelarPagamentoPendente(id, user.id);
+  }
+
   // Agenda do próprio funcionário logado. ?data=2026-08-31 filtra o dia inteiro.
   @Roles(Papel.FUNCIONARIO)
   @Get("minha-agenda")

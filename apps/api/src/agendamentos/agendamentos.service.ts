@@ -456,6 +456,30 @@ export class AgendamentosService {
     return this.mapearPagamento(pagamento);
   }
 
+  // Cliente desistiu de pagar (ex: voltou da tela de pagamento sem concluir)
+  // — libera o horário e o grupo inteiro na hora, em vez de deixar preso até
+  // PENDENTE_EXPIRA_MINUTOS vencer sozinho (ver filtroStatusAtivo). Só mexe
+  // em algo se AINDA estiver PENDENTE: se o pagamento já aprovou (ex: o
+  // webhook chegou um instante antes de o cliente tocar "cancelar") ou já foi
+  // recusado, não desfaz nada — evita cancelar um agendamento que na verdade
+  // já foi pago.
+  async cancelarPagamentoPendente(pagamentoId: string, clienteId: string) {
+    const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
+    if (!pagamento || pagamento.clienteId !== clienteId) throw new NotFoundException("Pagamento não encontrado.");
+
+    if (pagamento.status === StatusPagamento.PENDENTE && pagamento.grupoId) {
+      await this.prisma.$transaction([
+        this.prisma.agendamento.updateMany({
+          where: { grupoId: pagamento.grupoId, status: StatusAgendamento.PENDENTE },
+          data: { status: StatusAgendamento.CANCELADO },
+        }),
+        this.prisma.pagamento.update({ where: { id: pagamentoId }, data: { status: StatusPagamento.RECUSADO } }),
+      ]);
+    }
+
+    return this.mapearPagamento(await this.prisma.pagamento.findUniqueOrThrow({ where: { id: pagamentoId } }));
+  }
+
   // Usado tanto pelo poll acima quanto pelo webhook (ver WebhooksService) —
   // busca o status atual no Mercado Pago e atualiza Pagamento/Agendamentos.
   private async sincronizarPagamentoComGateway(pagamentoId: string, gatewayPagamentoId: string, token: string) {

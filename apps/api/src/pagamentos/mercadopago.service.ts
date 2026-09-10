@@ -98,6 +98,18 @@ export class MercadoPagoService {
     return !!this.config.get<string>("MERCADOPAGO_CLIENT_ID") && !!this.config.get<string>("MERCADOPAGO_CLIENT_SECRET");
   }
 
+  // Chave pública usada pra TOKENIZAR o cartão no aparelho do cliente (ver
+  // CartaoScreen) — é a chave da própria APLICAÇÃO (marketplace), não da
+  // conta conectada de cada barbearia. Tokenização não é específica de quem
+  // vai receber o dinheiro (isso só é decidido depois, na hora de criar o
+  // pagamento com o access token DAQUELA barbearia — ver criarPagamentoCartao)
+  // — e, na prática, o Mercado Pago nem sempre devolve um public_key no OAuth
+  // de contas conectadas novas/sem credenciais geradas (ver trocarCodigoPorToken),
+  // então usar a chave da aplicação evita depender disso.
+  get publicKeyPlataforma(): string | null {
+    return this.config.get<string>("MERCADOPAGO_PUBLIC_KEY") ?? null;
+  }
+
   private get accessToken(): string {
     const token = this.config.get<string>("MERCADOPAGO_ACCESS_TOKEN");
     if (!token) throw new Error("MERCADOPAGO_ACCESS_TOKEN não configurado.");
@@ -176,6 +188,13 @@ export class MercadoPagoService {
     if (!resposta.ok) {
       this.logger.error(`Falha ao trocar code por token no Mercado Pago: ${resposta.status} ${JSON.stringify(corpo)}`);
       throw new BadRequestException("Não foi possível concluir a conexão com o Mercado Pago. Tente novamente.");
+    }
+    if (!corpo.public_key) {
+      // Não é um erro — só registra, porque é comum o Mercado Pago não
+      // devolver public_key pra contas conectadas novas (ver
+      // publicKeyPlataforma acima, que é o que realmente é usado pra
+      // tokenizar cartão).
+      this.logger.warn(`OAuth do Mercado Pago não devolveu public_key para a conta ${corpo.user_id} (usando a chave da aplicação como fallback).`);
     }
     return {
       accessToken: corpo.access_token,
