@@ -445,6 +445,18 @@ export class MercadoPagoService {
           installments: 1,
           payment_method_id: params.paymentMethodId,
           external_reference: params.externalReference,
+          // Modelo marketplace/split: o cartão foi tokenizado com a chave
+          // PÚBLICA DA PLATAFORMA (ver CartaoScreen/publicKeyPlataforma), mas
+          // quem cobra aqui é o access_token DA BARBEARIA (accessTokenOverride,
+          // obtido via OAuth) — combinação diferente de aplicação/conta. A
+          // documentação oficial do Mercado Pago pra Split de Pagamentos
+          // (checkout transparente em marketplace) exige o campo
+          // `application_fee` nessa combinação — sem ele, o Mercado Pago
+          // recusava com "Invalid payment_method_id" mesmo com a bandeira
+          // certa e habilitada na conta (confirmado nos logs de produção).
+          // Como a Divisions Tech não cobra comissão em cima do agendamento,
+          // manda 0.
+          application_fee: 0,
           payer: {
             email: params.payerEmail,
             identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
