@@ -69,13 +69,7 @@ export class BarbeariasService {
   async buscarInfoPublica(id: string) {
     const barbearia = await this.prisma.barbearia.findUnique({ where: { id }, select: SELECT_PUBLICO });
     if (!barbearia) throw new NotFoundException("Barbearia não encontrada.");
-    return {
-      ...this.comChavePublicaResolvida(barbearia),
-      // TEMP — diagnóstico pra confirmar se MERCADOPAGO_PUBLIC_KEY está
-      // chegando no servidor. Não expõe o valor, só se está definida ou não.
-      // Remover depois de confirmar.
-      _debugMpPublicKeyPlataformaDefinida: this.mercadoPago.publicKeyPlataforma != null,
-    };
+    return this.comChavePublicaResolvida(barbearia);
   }
 
   atualizar(id: string, dto: UpdateBarbeariaDto) {

@@ -368,7 +368,16 @@ export class MercadoPagoService {
   // e essa consulta só pode ser feita com o access token (não dá pra fazer
   // pelo app com a chave pública), por isso mora aqui e não no app.
   async identificarBandeiraCartao(bin: string, accessTokenOverride: string): Promise<{ paymentMethodId: string }> {
-    const corpo: any = await this.chamar(`/v1/payment_methods/search?bin=${encodeURIComponent(bin)}`, undefined, accessTokenOverride);
+    // Esse endpoint específico do Mercado Pago exige a chave PÚBLICA na
+    // própria URL — o Bearer do access token (accessTokenOverride) sozinho
+    // não basta, ele responde "public_key is required" mesmo autenticado
+    // (constatado nos logs de produção). Usa a chave da aplicação (mesma
+    // ideia de publicKeyPlataforma/comChavePublicaResolvida em
+    // BarbeariasService) já que essa consulta é só "que bandeira é esse BIN",
+    // sem relação com qual barbearia vai receber o pagamento.
+    const query = new URLSearchParams({ bin });
+    if (this.publicKeyPlataforma) query.set("public_key", this.publicKeyPlataforma);
+    const corpo: any = await this.chamar(`/v1/payment_methods/search?${query.toString()}`, undefined, accessTokenOverride);
     const resultados: any[] = Array.isArray(corpo) ? corpo : (corpo?.results ?? []);
     const encontrado = resultados[0];
     if (!encontrado?.id) {
