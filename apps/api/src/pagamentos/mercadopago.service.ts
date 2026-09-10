@@ -390,6 +390,25 @@ export class MercadoPagoService {
       resultados.find((r) => r.payment_type_id === "credit_card" && r.status === "active") ??
       resultados.find((r) => r.status === "active") ??
       resultados[0];
+
+    // DEBUG TEMPORÁRIO: identificar a bandeira (BIN) vem passando, mas o
+    // Mercado Pago segue recusando a cobrança com "Invalid payment_method_id"
+    // (erro 3028) — hipótese: a conta conectada dessa barbearia ainda não tem
+    // cartão habilitado como meio de RECEBIMENTO (Pix funciona à parte). Esse
+    // log lista os métodos que essa conta realmente aceita, pra confirmar.
+    // Nunca deixa a reserva cair por causa disso (só loga, envolto em try/catch).
+    try {
+      const metodosDaConta: any = await this.chamar("/v1/payment_methods", undefined, accessTokenOverride);
+      const resumo = (Array.isArray(metodosDaConta) ? metodosDaConta : []).map((m: any) => ({
+        id: m.id,
+        tipo: m.payment_type_id,
+        status: m.status,
+      }));
+      this.logger.warn(`[DEBUG cartão] bandeira identificada="${encontrado?.id}" | métodos habilitados na conta da barbearia: ${JSON.stringify(resumo)}`);
+    } catch (e) {
+      this.logger.warn(`[DEBUG cartão] falha ao listar métodos habilitados da conta da barbearia: ${e}`);
+    }
+
     if (!encontrado?.id) {
       throw new BadRequestException("Não foi possível identificar a bandeira desse cartão. Confira o número digitado.");
     }
