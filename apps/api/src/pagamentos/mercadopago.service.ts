@@ -113,10 +113,21 @@ export class MercadoPagoService {
         ...(init?.headers ?? {}),
       },
     });
-    const corpo = await resposta.json().catch(() => null);
+    const corpo: any = await resposta.json().catch(() => null);
     if (!resposta.ok) {
       this.logger.error(`Mercado Pago ${init?.method ?? "GET"} ${path} -> ${resposta.status}: ${JSON.stringify(corpo)}`);
-      throw new Error(`Falha ao comunicar com o Mercado Pago (HTTP ${resposta.status}).`);
+      // O Mercado Pago manda o motivo certo em `cause[0].description` (ex:
+      // "cpf invalid", "Invalid parameter identification.number") ou, às
+      // vezes, só em `message` — sobe esse texto pra quem chamou em vez de um
+      // erro genérico, senão o cliente final nunca sabe o que corrigir (ver
+      // AgendamentosService.criarLote, que repassa BadRequestException como
+      // veio em vez de mascarar tudo com uma mensagem só).
+      const detalhe = corpo?.cause?.[0]?.description || corpo?.message || null;
+      throw new BadRequestException(
+        detalhe
+          ? `O Mercado Pago recusou a operação: ${detalhe}`
+          : `Falha ao comunicar com o Mercado Pago (HTTP ${resposta.status}).`,
+      );
     }
     return corpo as T;
   }

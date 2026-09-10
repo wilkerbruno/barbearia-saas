@@ -215,6 +215,11 @@ export class AgendamentosService {
       this.logger.error(`Falha ao gerar cobrança pro agendamento (grupo ${grupoId}): ${e}`);
       await this.prisma.agendamento.updateMany({ where: { grupoId }, data: { status: StatusAgendamento.CANCELADO } });
       await this.prisma.pagamento.update({ where: { id: pagamento.id }, data: { status: StatusPagamento.RECUSADO } });
+      // Erros com mensagem própria (ex: motivo específico do Mercado Pago, ou
+      // "bandeira não identificada") já são claros o suficiente pro cliente —
+      // só cai na mensagem genérica quando o erro é algo inesperado (ex: falha
+      // de rede) sem nada útil pra mostrar.
+      if (e instanceof BadRequestException) throw e;
       throw new BadRequestException("Não foi possível gerar a cobrança agora. Tente novamente em instantes.");
     }
 
