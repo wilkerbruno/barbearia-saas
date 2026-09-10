@@ -199,6 +199,7 @@ export class AgendamentosService {
             paymentMethodId,
             payerEmail: cliente.email,
             payerCpf: dto.cartaoCpf,
+            payerNome: cliente.nome,
           },
           tokenBarbearia,
         );

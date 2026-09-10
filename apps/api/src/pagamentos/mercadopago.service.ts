@@ -412,6 +412,7 @@ export class MercadoPagoService {
       paymentMethodId: string;
       payerEmail: string;
       payerCpf: string;
+      payerNome: string;
     },
     accessTokenOverride: string,
   ): Promise<CartaoPagamentoCriado> {
@@ -432,6 +433,14 @@ export class MercadoPagoService {
     // é traduzido pro mesmo vocabulário ("approved"/"pending"/"rejected")
     // que o resto do código (ex: AgendamentosService) já usa.
     const valorFormatado = (Math.round(params.valorCentavos) / 100).toFixed(2);
+    // "HTTP 422 Unprocessable Entity" genérico (sem detalhe nenhum no corpo)
+    // veio depois de corrigir o external_reference — a estrutura da
+    // requisição já bate com o exemplo oficial do SDK Node.js do próprio
+    // Mercado Pago (mercadopago/sdk-nodejs), mas esse exemplo SEMPRE inclui
+    // nome do pagador (first_name/last_name) e statement_descriptor, que
+    // aqui não iam. Adiciona os dois — a Orders API parece validar o payer
+    // de forma mais rígida que a API clássica (que aceitava só e-mail+CPF).
+    const [primeiroNome, ...restoNome] = params.payerNome.trim().split(/\s+/);
     const corpo: any = await this.chamar(
       "/v1/orders",
       {
@@ -444,6 +453,8 @@ export class MercadoPagoService {
           external_reference: params.externalReference,
           payer: {
             email: params.payerEmail,
+            first_name: primeiroNome || params.payerNome,
+            last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
             identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
           },
           transactions: {
@@ -455,6 +466,7 @@ export class MercadoPagoService {
                   type: "credit_card",
                   token: params.token,
                   installments: 1,
+                  statement_descriptor: params.descricao.slice(0, 22),
                 },
               },
             ],
