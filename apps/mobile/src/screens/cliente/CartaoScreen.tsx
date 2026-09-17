@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { AgendamentoLoteCriado, BarbeariaPublica, centavosParaReais } from "@barbearia-saas/shared";
+import { AgendamentoLoteCriado, BarbeariaPublica, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -30,6 +30,15 @@ export function CartaoScreen({ route, navigation }: Props) {
   const [nomeTitular, setNomeTitular] = useState("");
   const [cpf, setCpf] = useState("");
   const [enviando, setEnviando] = useState(false);
+
+  // Bandeira reconhecida AO VIVO, direto dos dígitos já digitados — sem
+  // nenhuma chamada de rede (ver identificarBandeiraLocal no pacote
+  // compartilhado). Existe pra duas coisas: o cliente confirmar visualmente
+  // que digitou o cartão certo, e o time de dev conferir na hora que a
+  // bandeira bate com o cartão de teste, sem precisar olhar log do servidor
+  // (era esse o pedido depois do bug de "bandeira sempre aparecia master").
+  const numeroLimpo = numero.replace(/\D/g, "");
+  const bandeira = useMemo(() => identificarBandeiraLocal(numeroLimpo), [numeroLimpo]);
 
   useEffect(() => {
     api
@@ -142,6 +151,11 @@ export function CartaoScreen({ route, navigation }: Props) {
             maxLength={23}
             style={styles.input}
           />
+          {numeroLimpo.length >= 6 && (
+            <View style={[styles.badgeBandeira, { backgroundColor: bandeira ? corBandeira(bandeira.paymentMethodId) : colors.inkMuted }]}>
+              <Text style={styles.badgeBandeiraTexto}>{bandeira ? bandeira.nome : "Bandeira não reconhecida"}</Text>
+            </View>
+          )}
           <View style={{ flexDirection: "row", gap: spacing.sm }}>
             <TextInput
               value={validade}
@@ -197,6 +211,29 @@ export function CartaoScreen({ route, navigation }: Props) {
   );
 }
 
+// Cor de referência de cada bandeira só pro selo visual (não são os logos
+// oficiais — evitamos embutir marca registrada de terceiros; o texto já
+// deixa claro qual bandeira foi identificada, que é o que importa pra
+// conferir visualmente sem log).
+function corBandeira(paymentMethodId: string): string {
+  switch (paymentMethodId) {
+    case "visa":
+      return "#1A1F71";
+    case "master":
+      return "#EB5D24";
+    case "elo":
+      return "#000000";
+    case "amex":
+      return "#2E77BB";
+    case "hipercard":
+      return "#B10000";
+    case "diners":
+      return "#0079BE";
+    default:
+      return colors.inkMuted;
+  }
+}
+
 function formatarNumeroCartao(valor: string): string {
   const digitos = valor.replace(/\D/g, "").slice(0, 19);
   return digitos.replace(/(\d{4})(?=\d)/g, "$1 ");
@@ -232,5 +269,17 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     fontSize: 14,
     color: colors.ink,
+  },
+  badgeBandeira: {
+    alignSelf: "flex-start",
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+  },
+  badgeBandeiraTexto: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
   },
 });

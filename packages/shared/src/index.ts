@@ -441,3 +441,122 @@ export function centavosParaReais(centavos: number): string {
     currency: "BRL",
   });
 }
+
+// ============================= BANDEIRA DO CARTÃO (detecção local) =============================
+
+// Identifica a bandeira do cartão (no mesmo vocabulário de `payment_method_id`
+// que o Mercado Pago usa: "visa", "master", "elo" etc.) a partir dos
+// primeiros dígitos do número — SEM depender de nenhuma chamada de rede.
+//
+// Por que local e não via API do Mercado Pago: até set/2026 o backend usava
+// GET /v1/payment_methods/search?bin=... (ver MercadoPagoService), mas o
+// próprio Mercado Pago descontinuou o filtro por BIN nesse endpoint
+// ("Changes to the Payment Methods API search", anunciado 26/07/2024, com
+// rollout escalonado por país até nov/2024 —
+// https://www.mercadopago.com.br/developers/pt/news/2024/07/26/Changes-to-the-Payment-Methods-API-search--effective-09-09-2024).
+// Confirmamos isso na prática, testando o endpoint em sandbox com 3 BINs
+// diferentes (incluindo um BIN de cartão de teste OFICIAL do próprio
+// Mercado Pago, 423564 = Visa): a chamada sempre devolveu a MESMA lista com
+// os ~80 meios de pagamento habilitados na conta inteira, ignorando
+// completamente o `bin` enviado. Era exatamente isso que causava o bug de
+// produção "bandeira sempre aparece como master": o código pegava o
+// primeiro resultado de crédito dessa lista genérica (que por coincidência
+// é sempre um Mastercard), não o cartão que o cliente realmente digitou.
+//
+// A tabela abaixo é o método padrão da indústria pra esse tipo de detecção
+// (o mesmo princípio de "começa com 4 = Visa" usado por qualquer gateway de
+// pagamento) — funciona 100% offline e na hora, então serve tanto pro
+// backend confirmar o payment_method_id antes de cobrar (ver
+// MercadoPagoService.identificarBandeiraCartao) quanto pro app mostrar a
+// bandeira ao cliente assim que ele digita o número, sem precisar de log
+// nenhum (ver CartaoScreen).
+export interface BandeiraCartao {
+  paymentMethodId: string; // vocabulário do Mercado Pago: "visa", "master", "elo", "amex", "hipercard", "diners"
+  nome: string; // nome de exibição
+}
+
+// BINs conhecidos da Elo — ao contrário de Visa/Master/Amex, a Elo não usa
+// uma faixa simples de primeiros dígitos; essa é a lista pública de
+// prefixos/faixas usada por integrações de pagamento brasileiras em geral.
+const ELO_PREFIXOS_EXATOS = [
+  "401178", "401179", "431274", "438935", "451416", "457393", "457631", "457632",
+  "504175", "627780", "636297", "636368",
+];
+const ELO_FAIXAS_SEIS_DIGITOS: Array<[number, number]> = [
+  [506699, 506778],
+  [509000, 509999],
+  [650031, 650033],
+  [650035, 650051],
+  [650405, 650439],
+  [650485, 650538],
+  [650541, 650598],
+  [650700, 650718],
+  [650720, 650727],
+  [650901, 650920],
+  [651652, 651679],
+  [655000, 655019],
+  [655021, 655058],
+];
+
+function seisDigitosNaFaixa(digitos: string, faixas: Array<[number, number]>): boolean {
+  const seis = Number(digitos.slice(0, 6));
+  return faixas.some(([inicio, fim]) => seis >= inicio && seis <= fim);
+}
+
+// Os cartões de TESTE oficiais que o próprio Mercado Pago publica pro
+// sandbox (ex: "5031 4332 1540 6351" pra Mastercard) usam BINs fictícios que
+// não seguem as faixas reais das bandeiras (503... nunca foi emitido como
+// Mastercard de verdade) — só servem pra simular uma cobrança, nunca tocam
+// numa rede de cartão real. Sem esse caso especial, a tabela de faixas reais
+// abaixo (correta pra qualquer cartão real de cliente, que é o que importa
+// em produção) devolveria "não reconhecida" pra esses cartões de teste,
+// dando a impressão de bug ao testar em sandbox.
+const BINS_TESTE_MERCADOPAGO: Record<string, BandeiraCartao> = {
+  "503143": { paymentMethodId: "master", nome: "Mastercard" },
+  "423564": { paymentMethodId: "visa", nome: "Visa" },
+};
+
+// `numeroCartao` pode vir com espaços/máscara — só os dígitos importam, e
+// bastam os 6 primeiros (BIN) pra identificar a bandeira. Devolve `null`
+// enquanto não houver dígitos suficientes (ex: cliente ainda digitando) ou
+// se nenhuma bandeira suportada bater — quem chamar decide o que fazer
+// (no app, simplesmente não mostra nada ainda; no backend, isso vira erro
+// pro cliente confirmar o número).
+export function identificarBandeiraLocal(numeroCartao: string): BandeiraCartao | null {
+  const digitos = numeroCartao.replace(/\D/g, "");
+  if (digitos.length < 6) return null;
+
+  const seisDigitos = digitos.slice(0, 6);
+  if (BINS_TESTE_MERCADOPAGO[seisDigitos]) return BINS_TESTE_MERCADOPAGO[seisDigitos];
+
+  const doisDigitos = digitos.slice(0, 2);
+  const tresDigitos = Number(digitos.slice(0, 3));
+  const quatroDigitos = digitos.slice(0, 4);
+  const quatroNum = Number(quatroDigitos);
+  const doisNum = Number(doisDigitos);
+
+  // Elo primeiro: alguns prefixos dela (ex: 627780) começam com dígitos que
+  // também aparecem em faixas de outras bandeiras, então precisa ser checado
+  // antes das demais.
+  if (ELO_PREFIXOS_EXATOS.some((p) => digitos.startsWith(p)) || seisDigitosNaFaixa(digitos, ELO_FAIXAS_SEIS_DIGITOS)) {
+    return { paymentMethodId: "elo", nome: "Elo" };
+  }
+  // Hipercard antes de Diners/Amex porque "3841" cairia na faixa genérica de
+  // Diners (38) se checado depois.
+  if (digitos.slice(0, 6) === "606282" || quatroDigitos === "3841") {
+    return { paymentMethodId: "hipercard", nome: "Hipercard" };
+  }
+  if (doisDigitos === "34" || doisDigitos === "37") {
+    return { paymentMethodId: "amex", nome: "American Express" };
+  }
+  if (doisDigitos === "36" || doisDigitos === "38" || doisDigitos === "39" || (tresDigitos >= 300 && tresDigitos <= 305)) {
+    return { paymentMethodId: "diners", nome: "Diners Club" };
+  }
+  if ((doisNum >= 51 && doisNum <= 55) || (quatroNum >= 2221 && quatroNum <= 2720)) {
+    return { paymentMethodId: "master", nome: "Mastercard" };
+  }
+  if (digitos.startsWith("4")) {
+    return { paymentMethodId: "visa", nome: "Visa" };
+  }
+  return null;
+}

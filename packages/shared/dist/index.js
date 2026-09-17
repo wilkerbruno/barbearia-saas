@@ -5,6 +5,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StatusFatura = exports.StatusAssinatura = exports.StatusAssinaturaPacote = exports.StatusPagamento = exports.MetodoPagamento = exports.AVISO_NAO_COMPARECIMENTO = exports.OrigemAgendamento = exports.StatusAgendamento = exports.Papel = void 0;
 exports.centavosParaReais = centavosParaReais;
+exports.identificarBandeiraLocal = identificarBandeiraLocal;
 // ============================= PAPÉIS (RBAC) =============================
 // Não usamos `enum` (TypeScript) aqui de propósito: um `enum` é um tipo
 // "nominal" — o TypeScript não aceita a string equivalente vinda de outro
@@ -80,4 +81,85 @@ function centavosParaReais(centavos) {
         style: "currency",
         currency: "BRL",
     });
+}
+// BINs conhecidos da Elo — ao contrário de Visa/Master/Amex, a Elo não usa
+// uma faixa simples de primeiros dígitos; essa é a lista pública de
+// prefixos/faixas usada por integrações de pagamento brasileiras em geral.
+const ELO_PREFIXOS_EXATOS = [
+    "401178", "401179", "431274", "438935", "451416", "457393", "457631", "457632",
+    "504175", "627780", "636297", "636368",
+];
+const ELO_FAIXAS_SEIS_DIGITOS = [
+    [506699, 506778],
+    [509000, 509999],
+    [650031, 650033],
+    [650035, 650051],
+    [650405, 650439],
+    [650485, 650538],
+    [650541, 650598],
+    [650700, 650718],
+    [650720, 650727],
+    [650901, 650920],
+    [651652, 651679],
+    [655000, 655019],
+    [655021, 655058],
+];
+function seisDigitosNaFaixa(digitos, faixas) {
+    const seis = Number(digitos.slice(0, 6));
+    return faixas.some(([inicio, fim]) => seis >= inicio && seis <= fim);
+}
+// Os cartões de TESTE oficiais que o próprio Mercado Pago publica pro
+// sandbox (ex: "5031 4332 1540 6351" pra Mastercard) usam BINs fictícios que
+// não seguem as faixas reais das bandeiras (503... nunca foi emitido como
+// Mastercard de verdade) — só servem pra simular uma cobrança, nunca tocam
+// numa rede de cartão real. Sem esse caso especial, a tabela de faixas reais
+// abaixo (correta pra qualquer cartão real de cliente, que é o que importa
+// em produção) devolveria "não reconhecida" pra esses cartões de teste,
+// dando a impressão de bug ao testar em sandbox.
+const BINS_TESTE_MERCADOPAGO = {
+    "503143": { paymentMethodId: "master", nome: "Mastercard" },
+    "423564": { paymentMethodId: "visa", nome: "Visa" },
+};
+// `numeroCartao` pode vir com espaços/máscara — só os dígitos importam, e
+// bastam os 6 primeiros (BIN) pra identificar a bandeira. Devolve `null`
+// enquanto não houver dígitos suficientes (ex: cliente ainda digitando) ou
+// se nenhuma bandeira suportada bater — quem chamar decide o que fazer
+// (no app, simplesmente não mostra nada ainda; no backend, isso vira erro
+// pro cliente confirmar o número).
+function identificarBandeiraLocal(numeroCartao) {
+    const digitos = numeroCartao.replace(/\D/g, "");
+    if (digitos.length < 6)
+        return null;
+    const seisDigitos = digitos.slice(0, 6);
+    if (BINS_TESTE_MERCADOPAGO[seisDigitos])
+        return BINS_TESTE_MERCADOPAGO[seisDigitos];
+    const doisDigitos = digitos.slice(0, 2);
+    const tresDigitos = Number(digitos.slice(0, 3));
+    const quatroDigitos = digitos.slice(0, 4);
+    const quatroNum = Number(quatroDigitos);
+    const doisNum = Number(doisDigitos);
+    // Elo primeiro: alguns prefixos dela (ex: 627780) começam com dígitos que
+    // também aparecem em faixas de outras bandeiras, então precisa ser checado
+    // antes das demais.
+    if (ELO_PREFIXOS_EXATOS.some((p) => digitos.startsWith(p)) || seisDigitosNaFaixa(digitos, ELO_FAIXAS_SEIS_DIGITOS)) {
+        return { paymentMethodId: "elo", nome: "Elo" };
+    }
+    // Hipercard antes de Diners/Amex porque "3841" cairia na faixa genérica de
+    // Diners (38) se checado depois.
+    if (digitos.slice(0, 6) === "606282" || quatroDigitos === "3841") {
+        return { paymentMethodId: "hipercard", nome: "Hipercard" };
+    }
+    if (doisDigitos === "34" || doisDigitos === "37") {
+        return { paymentMethodId: "amex", nome: "American Express" };
+    }
+    if (doisDigitos === "36" || doisDigitos === "38" || doisDigitos === "39" || (tresDigitos >= 300 && tresDigitos <= 305)) {
+        return { paymentMethodId: "diners", nome: "Diners Club" };
+    }
+    if ((doisNum >= 51 && doisNum <= 55) || (quatroNum >= 2221 && quatroNum <= 2720)) {
+        return { paymentMethodId: "master", nome: "Mastercard" };
+    }
+    if (digitos.startsWith("4")) {
+        return { paymentMethodId: "visa", nome: "Visa" };
+    }
+    return null;
 }

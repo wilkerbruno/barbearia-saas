@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import * as crypto from "crypto";
+import { identificarBandeiraLocal } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 
 const MP_API_URL = "https://api.mercadopago.com";
@@ -364,37 +365,36 @@ export class MercadoPagoService {
 
   // Identifica a bandeira do cartão (payment_method_id, ex: "visa",
   // "master") a partir do BIN (6 primeiros dígitos) — o Mercado Pago exige
-  // esse id explícito na hora de criar o pagamento (ver criarPagamentoCartao)
-  // e essa consulta só pode ser feita com o access token (não dá pra fazer
-  // pelo app com a chave pública), por isso mora aqui e não no app.
-  async identificarBandeiraCartao(bin: string, accessTokenOverride: string): Promise<{ paymentMethodId: string }> {
-    // Esse endpoint específico do Mercado Pago exige a chave PÚBLICA na
-    // própria URL — o Bearer do access token (accessTokenOverride) sozinho
-    // não basta, ele responde "public_key is required" mesmo autenticado
-    // (constatado nos logs de produção). Usa a chave da aplicação (mesma
-    // ideia de publicKeyPlataforma/comChavePublicaResolvida em
-    // BarbeariasService) já que essa consulta é só "que bandeira é esse BIN",
-    // sem relação com qual barbearia vai receber o pagamento.
-    const query = new URLSearchParams({ bin });
-    if (this.publicKeyPlataforma) query.set("public_key", this.publicKeyPlataforma);
-    const corpo: any = await this.chamar(`/v1/payment_methods/search?${query.toString()}`, undefined, accessTokenOverride);
-    const resultados: any[] = Array.isArray(corpo) ? corpo : (corpo?.results ?? []);
-    // O mesmo BIN às vezes casa com MAIS de um resultado — ex: "visa"
-    // (crédito) e "debvisa" (débito) — porque o Mercado Pago não consegue
-    // saber só pelo BIN qual é. Como só cobramos à vista e não implementamos
-    // o fluxo extra de autenticação que cartão de DÉBITO exige por essa API,
-    // sempre preferimos a versão de CRÉDITO explicitamente; pegar sempre o
-    // primeiro resultado (às vezes vem o de débito primeiro) fazia o
-    // Mercado Pago recusar a cobrança com "Invalid payment_method_id".
-    const encontrado =
-      resultados.find((r) => r.payment_type_id === "credit_card" && r.status === "active") ??
-      resultados.find((r) => r.status === "active") ??
-      resultados[0];
-
-    if (!encontrado?.id) {
+  // esse id explícito na hora de criar o pagamento (ver criarPagamentoCartao).
+  //
+  // HISTÓRICO (bug de produção "bandeira sempre master", investigado set/2026):
+  // essa função chamava GET /v1/payment_methods/search?bin=...&public_key=...
+  // pra descobrir a bandeira pelo BIN. O Mercado Pago, porém, descontinuou o
+  // filtro por BIN nesse endpoint ("Changes to the Payment Methods API
+  // search", anunciado 26/07/2024, rollout escalonado por país até nov/2024 —
+  // https://www.mercadopago.com.br/developers/pt/news/2024/07/26/Changes-to-the-Payment-Methods-API-search--effective-09-09-2024).
+  // Confirmamos isso testando o endpoint em sandbox com 3 BINs diferentes
+  // (inclusive um BIN de cartão de teste OFICIAL do próprio Mercado Pago,
+  // 423564 = Visa, e sem nenhum header de Authorization, pra descartar
+  // qualquer influência dele): a chamada sempre devolveu a MESMA lista com
+  // os ~80 meios de pagamento habilitados na conta inteira (Mastercard,
+  // Visa, Amex, Elo, Pix, boleto, repetidos por vários emissores),
+  // ignorando completamente o `bin` enviado. Como o código pegava o
+  // primeiro resultado de crédito dessa lista genérica — que por coincidência
+  // é sempre um Mastercard —, o resultado era sempre "master", não importa o
+  // cartão real do cliente.
+  //
+  // A correção é não depender mais dessa chamada: identificarBandeiraLocal
+  // (pacote compartilhado) reconhece a bandeira pelos próprios dígitos do
+  // BIN (mesma técnica usada por qualquer gateway de pagamento, sem chamada
+  // de rede nenhuma) — funciona tanto aqui quanto no app (ver CartaoScreen,
+  // que agora mostra a bandeira ao cliente assim que ele digita o número).
+  async identificarBandeiraCartao(bin: string): Promise<{ paymentMethodId: string }> {
+    const bandeira = identificarBandeiraLocal(bin);
+    if (!bandeira) {
       throw new BadRequestException("Não foi possível identificar a bandeira desse cartão. Confira o número digitado.");
     }
-    return { paymentMethodId: encontrado.id };
+    return { paymentMethodId: bandeira.paymentMethodId };
   }
 
   // Cria a cobrança com o cartão TOKENIZADO direto no app do cliente (ver
@@ -441,66 +441,37 @@ export class MercadoPagoService {
     // aqui não iam. Adiciona os dois — a Orders API parece validar o payer
     // de forma mais rígida que a API clássica (que aceitava só e-mail+CPF).
     const [primeiroNome, ...restoNome] = params.payerNome.trim().split(/\s+/);
-    const idempotencyKey = crypto.randomUUID();
-    const payloadOrder = {
-      type: "online",
-      processing_mode: "automatic",
-      total_amount: valorFormatado,
-      external_reference: params.externalReference,
-      payer: {
-        email: params.payerEmail,
-        first_name: primeiroNome || params.payerNome,
-        last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
-        identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
-      },
-      transactions: {
-        payments: [
-          {
-            amount: valorFormatado,
-            payment_method: {
-              id: params.paymentMethodId,
-              type: "credit_card",
-              token: params.token,
-              installments: 1,
-            },
-          },
-        ],
-      },
-    };
-
-    // Diagnóstico temporário e sanitizado: não registra número do cartão, CVV
-    // nem o token completo. Não altera o payload nem o fluxo de pagamento.
-    this.logger.warn(
-      `[DIAGNOSTICO CARTAO] Order antes do envio: ${JSON.stringify({
-        type: payloadOrder.type,
-        processing_mode: payloadOrder.processing_mode,
-        total_amount: payloadOrder.total_amount,
-        external_reference: payloadOrder.external_reference,
-        payer: {
-          email_present: Boolean(params.payerEmail),
-          email_domain: params.payerEmail?.split("@")[1] ?? null,
-          first_name_present: Boolean(primeiroNome),
-          last_name_present: Boolean(restoNome.join(" ")),
-          cpf_present: Boolean(params.payerCpf.replace(/\D/g, "")),
-          cpf_length: params.payerCpf.replace(/\D/g, "").length,
-        },
-        payment_method: {
-          id: params.paymentMethodId,
-          type: "credit_card",
-          token_present: Boolean(params.token),
-          token_length: params.token?.length ?? 0,
-          installments: 1,
-        },
-        idempotency_key: idempotencyKey,
-      })}`,
-    );
-
     const corpo: any = await this.chamar(
       "/v1/orders",
       {
         method: "POST",
-        headers: { "X-Idempotency-Key": idempotencyKey },
-        body: JSON.stringify(payloadOrder),
+        headers: { "X-Idempotency-Key": crypto.randomUUID() },
+        body: JSON.stringify({
+          type: "online",
+          processing_mode: "automatic",
+          total_amount: valorFormatado,
+          external_reference: params.externalReference,
+          payer: {
+            email: params.payerEmail,
+            first_name: primeiroNome || params.payerNome,
+            last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
+            identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
+          },
+          transactions: {
+            payments: [
+              {
+                amount: valorFormatado,
+                payment_method: {
+                  id: params.paymentMethodId,
+                  type: "credit_card",
+                  token: params.token,
+                  installments: 1,
+                  statement_descriptor: params.descricao.slice(0, 22),
+                },
+              },
+            ],
+          },
+        }),
       },
       accessTokenOverride,
     );

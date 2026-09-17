@@ -183,7 +183,7 @@ export class AgendamentosService {
         if (!dto.cartaoToken || !dto.cartaoBin || !dto.cartaoCpf) {
           throw new BadRequestException("Dados do cartão incompletos.");
         }
-        const { paymentMethodId } = await this.mercadoPago.identificarBandeiraCartao(dto.cartaoBin, tokenBarbearia);
+        const { paymentMethodId } = await this.mercadoPago.identificarBandeiraCartao(dto.cartaoBin);
         const cobranca = await this.mercadoPago.criarPagamentoCartao(
           {
             valorCentavos: valorTotalCentavos,

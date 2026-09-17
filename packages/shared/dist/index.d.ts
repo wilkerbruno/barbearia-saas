@@ -303,3 +303,8 @@ export interface Fatura {
     metodoPagamento?: string | null;
 }
 export declare function centavosParaReais(centavos: number): string;
+export interface BandeiraCartao {
+    paymentMethodId: string;
+    nome: string;
+}
+export declare function identificarBandeiraLocal(numeroCartao: string): BandeiraCartao | null;
