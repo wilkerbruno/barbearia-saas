@@ -210,6 +210,10 @@ export class AgendamentosService {
           data: {
             gatewayPagamentoId: cobranca.id,
             status: aprovadoNaHora ? StatusPagamento.APROVADO : recusado ? StatusPagamento.RECUSADO : StatusPagamento.PENDENTE,
+            // Preenchido só quando o Mercado Pago exigiu desafio 3DS (ver
+            // MercadoPagoService.criarPagamentoCartao) — o app usa isso pra
+            // decidir se mostra a WebView de confirmação com o banco.
+            desafio3dsUrl: cobranca.desafio3dsUrl,
           },
         });
         if (aprovadoNaHora) {
@@ -504,7 +508,12 @@ export class AgendamentosService {
           ? StatusPagamento.PENDENTE
           : StatusPagamento.RECUSADO;
 
-    const atualizado = await this.prisma.pagamento.update({ where: { id: pagamentoId }, data: { status: novoStatus } });
+    const atualizado = await this.prisma.pagamento.update({
+      where: { id: pagamentoId },
+      // `?? null`: PaymentDetalhe.desafio3dsUrl vem undefined pro Pix (não
+      // existe conceito de 3DS lá) — sem isso o Prisma reclamaria do tipo.
+      data: { status: novoStatus, desafio3dsUrl: pagamentoMp.desafio3dsUrl ?? null },
+    });
     if (novoStatus === StatusPagamento.APROVADO && atualizado.grupoId) {
       await this.prisma.agendamento.updateMany({
         where: { grupoId: atualizado.grupoId, status: StatusAgendamento.PENDENTE },
@@ -525,6 +534,7 @@ export class AgendamentosService {
     valorEstornadoCentavos: number;
     pixQrCodeBase64: string | null;
     pixCopiaECola: string | null;
+    desafio3dsUrl: string | null;
     criadoEm: Date;
   }, checkoutUrl?: string | null) {
     return {
@@ -538,6 +548,7 @@ export class AgendamentosService {
       valorEstornadoCentavos: pagamento.valorEstornadoCentavos,
       pixQrCodeBase64: pagamento.pixQrCodeBase64,
       pixCopiaECola: pagamento.pixCopiaECola,
+      desafio3dsUrl: pagamento.desafio3dsUrl,
       checkoutUrl: checkoutUrl ?? null,
       criadoEm: pagamento.criadoEm.toISOString(),
     };

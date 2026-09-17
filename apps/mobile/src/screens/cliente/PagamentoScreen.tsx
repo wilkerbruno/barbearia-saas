@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 import * as Clipboard from "expo-clipboard";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { centavosParaReais, MetodoPagamento, Pagamento, StatusPagamento } from "@barbearia-saas/shared";
@@ -20,11 +21,18 @@ const INTERVALO_POLL_MS = 4000;
 
 // Tela de pagamento do agendamento: Pix mostra QR + copia-e-cola; Cartão já
 // chega aqui com a cobrança decidida na hora (o formulário nativo — ver
-// CartaoScreen — tokenizou e cobrou o cartão sem sair do app), então o único
-// caso de "Cartão + PENDENTE" é raro (operadora demorou a confirmar) e só
-// mostra um aviso de aguardando. Em ambos os métodos, fica de olho no status
-// até aprovar (ou recusar) pra já devolver o cliente pra Meus agendamentos
-// com a confirmação certa.
+// CartaoScreen — tokenizou e cobrou o cartão sem sair do app). "Cartão +
+// PENDENTE" acontece em dois casos: a operadora simplesmente demorou a
+// confirmar (raro, só mostra um aviso de aguardando), ou o Mercado Pago
+// exigiu autenticação 3DS do titular (ver MercadoPagoService.
+// criarPagamentoCartao, histórico sobre pagamentos recusados como
+// "high_risk" de cara) — nesse caso `pagamento.desafio3dsUrl` vem
+// preenchida e mostra uma WebView com a página do banco pro cliente
+// confirmar. Em todos os casos, fica de olho no status até aprovar (ou
+// recusar) pra já devolver o cliente pra Meus agendamentos com a
+// confirmação certa — o mesmo poll de baixo cobre o desafio 3DS sem
+// precisar de nenhuma lógica extra (assim que o Mercado Pago decide o
+// resultado, o próximo poll já traz APROVADO/RECUSADO).
 export function PagamentoScreen({ route, navigation }: Props) {
   const { aviso } = route.params;
   const [pagamento, setPagamento] = useState<Pagamento>(route.params.pagamento);
@@ -158,6 +166,21 @@ export function PagamentoScreen({ route, navigation }: Props) {
               <Text style={styles.hint}>Aguardando confirmação do pagamento…</Text>
             </View>
           </>
+        ) : pagamento.desafio3dsUrl ? (
+          <>
+            <Text style={styles.sectionTitle}>Confirme com seu banco</Text>
+            <Text style={styles.hint}>
+              Por segurança, o Mercado Pago pediu uma confirmação extra. Complete abaixo com seu banco (senha, app ou biometria) pra
+              concluir o pagamento:
+            </Text>
+            <Card style={styles.webviewCard}>
+              <WebView source={{ uri: pagamento.desafio3dsUrl }} style={styles.webview} startInLoadingState />
+            </Card>
+            <View style={styles.aguardando}>
+              <ActivityIndicator color={colors.accent} size="small" />
+              <Text style={styles.hint}>Aguardando você concluir a confirmação…</Text>
+            </View>
+          </>
         ) : (
           <>
             <Text style={styles.sectionTitle}>Pagamento com cartão</Text>
@@ -186,6 +209,8 @@ const styles = StyleSheet.create({
   valor: { fontSize: 28, fontWeight: "800", color: colors.ink },
   hint: { fontSize: 13, color: colors.inkMuted, textAlign: "center" },
   qrCode: { width: 220, height: 220 },
+  webviewCard: { padding: 0, overflow: "hidden", height: 480 },
+  webview: { flex: 1 },
   codigoPix: { fontSize: 11, color: colors.ink, fontFamily: "monospace" },
   aguardando: { flexDirection: "row", alignItems: "center", gap: spacing.sm, justifyContent: "center", marginTop: spacing.md },
   avisoCard: { backgroundColor: colors.dangerSoft, marginTop: spacing.md },

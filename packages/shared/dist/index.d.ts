@@ -206,6 +206,7 @@ export interface Pagamento {
     pixQrCodeBase64?: string | null;
     pixCopiaECola?: string | null;
     checkoutUrl?: string | null;
+    desafio3dsUrl?: string | null;
     criadoEm: string;
 }
 export interface StatusConexaoMercadoPago {

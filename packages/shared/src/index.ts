@@ -313,6 +313,13 @@ export interface Pagamento {
   // CartaoScreen/MercadoPagoService.criarPagamentoCartao), então isso fica
   // sempre null em pagamentos novos; mantido só por compatibilidade de tipo.
   checkoutUrl?: string | null;
+  // Preenchida só quando metodo=CARTAO, status=PENDENTE e o Mercado Pago
+  // exigiu autenticação 3DS do titular (ver MercadoPagoService, histórico de
+  // set/2026 sobre pagamentos recusados como "high_risk" de cara) — o app
+  // (PagamentoScreen) abre essa URL numa WebView pro cliente confirmar com o
+  // próprio banco; o poll de status normal (já existente) detecta sozinho
+  // quando o desafio termina (aprovado/recusado) ou expira (40 min).
+  desafio3dsUrl?: string | null;
   criadoEm: string;
 }
 

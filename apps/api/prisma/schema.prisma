@@ -332,6 +332,10 @@ model Pagamento {
   // Pix: QR code pra exibir (imagem base64) e o "copia e cola" (texto).
   pixQrCodeBase64 String? @db.LongText
   pixCopiaECola   String? @db.Text
+  // URL do desafio 3DS do Mercado Pago (ver MercadoPagoService.criarPagamentoCartao)
+  // — só fica preenchida enquanto o pagamento está PENDENTE aguardando o
+  // titular confirmar com o próprio banco; o app abre isso numa WebView.
+  desafio3dsUrl String? @db.Text
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
 

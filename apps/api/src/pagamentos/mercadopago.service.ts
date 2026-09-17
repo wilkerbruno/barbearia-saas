@@ -35,6 +35,10 @@ export interface PaymentDetalhe {
   metodoPagamento: string | null;
   dataAprovacao: string | null;
   dataCriacao: string;
+  // URL do desafio 3DS (ver criarPagamentoCartao) — só vem preenchida
+  // enquanto a Order está "action_required"/"pending_challenge"; some de
+  // novo (null) assim que o comprador conclui ou o desafio expira.
+  desafio3dsUrl?: string | null;
 }
 
 export interface PixCriado {
@@ -55,6 +59,10 @@ export interface CartaoPagamentoCriado {
   // Motivo detalhado quando recusado (ex: "cc_rejected_insufficient_amount")
   // — ver traduzirMotivoRecusaCartao em AgendamentosService.
   statusDetail: string | null;
+  // Preenchida quando o Mercado Pago exige autenticação 3DS do titular antes
+  // de aprovar (ver criarPagamentoCartao) — o app precisa abrir essa URL
+  // numa WebView pro cliente confirmar com o próprio banco.
+  desafio3dsUrl: string | null;
 }
 
 export interface TokensOAuth {
@@ -457,6 +465,34 @@ export class MercadoPagoService {
             last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
             identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
           },
+          // HISTÓRICO (pagamento recusado de cara com status_detail
+          // "high_risk", mesmo em tentativas legítimas com cartão/CPF/valor
+          // diferentes — ver logs de produção set/2026): sem esse bloco, o
+          // Mercado Pago cria a Order com `transaction_security.validation:
+          // "never"` por padrão, ou seja, NUNCA aciona o desafio 3DS — pra
+          // qualquer transação que o antifraude deles considere arriscada
+          // (comum em conta de marketplace nova, sem histórico), a única
+          // saída que sobra pro motor de risco é recusar direto, sem dar
+          // chance de o titular se autenticar. "on_fraud_risk" pede pro
+          // Mercado Pago acionar o desafio 3DS SÓ quando o risco exigir (não
+          // em toda compra) — e `liability_shift: "required"` é obrigatório
+          // junto (transfere a responsabilidade por chargeback pro emissor
+          // do cartão quando o desafio é concluído). Doc oficial: Checkout
+          // Transparente via Orders > Payment management > Integrar 3DS 2.0.
+          // Quando a Order volta com status "action_required"/status_detail
+          // "pending_challenge", a URL do desafio vem em
+          // transactions.payments[0].payment_method.transaction_security.url
+          // (ver interpretarOrder abaixo) — o app abre isso numa WebView
+          // (ver CartaoScreen/PagamentoScreen) pro cliente confirmar com o
+          // próprio banco antes de aprovar.
+          config: {
+            online: {
+              transaction_security: {
+                validation: "on_fraud_risk",
+                liability_shift: "required",
+              },
+            },
+          },
           transactions: {
             payments: [
               {
@@ -475,12 +511,12 @@ export class MercadoPagoService {
       },
       accessTokenOverride,
     );
-    const { status, statusDetail } = this.interpretarOrder(corpo);
+    const { status, statusDetail, desafio3dsUrl } = this.interpretarOrder(corpo);
     // Guarda o id da ORDER (prefixo "ORD...", não o id do pagamento aninhado
     // dentro dela) — é esse id que fica salvo em Pagamento.gatewayPagamentoId
     // e usado depois em buscarPayment/estornarPagamento, que reconhecem esse
     // prefixo pra saber que devem usar a Orders API em vez da API clássica.
-    return { id: String(corpo.id), status, statusDetail };
+    return { id: String(corpo.id), status, statusDetail, desafio3dsUrl };
   }
 
   // Traduz o status de uma Order (API nova, usada pelo cartão — ver
@@ -492,7 +528,12 @@ export class MercadoPagoService {
   // clássica) que traduzirMotivoRecusaCartao usa; o status da Order em si é
   // mais genérico. Tabela oficial: Checkout Transparente via Orders >
   // Payment management > Status > Transaction status.
-  private interpretarOrder(corpo: any): { status: "approved" | "pending" | "rejected"; statusDetail: string | null; transacao: any } {
+  private interpretarOrder(corpo: any): {
+    status: "approved" | "pending" | "rejected";
+    statusDetail: string | null;
+    transacao: any;
+    desafio3dsUrl: string | null;
+  } {
     const transacao = corpo?.transactions?.payments?.[0];
     const statusBruto = transacao?.status ?? corpo?.status;
     const statusDetail = transacao?.status_detail ?? corpo?.status_detail ?? null;
@@ -502,7 +543,12 @@ export class MercadoPagoService {
         : ["created", "processing", "action_required", "in_review"].includes(statusBruto)
           ? "pending"
           : "rejected"; // failed, charged_back, refunded, expired, canceled
-    return { status, statusDetail, transacao };
+    // Só vem preenchida quando o Mercado Pago decidiu acionar o desafio 3DS
+    // pra essa transação (status_detail "pending_challenge", ver
+    // criarPagamentoCartao) — nos demais casos é undefined, por isso o `??
+    // null` (facilita quem só quer checar "tem desafio pendente ou não").
+    const desafio3dsUrl = transacao?.payment_method?.transaction_security?.url ?? null;
+    return { status, statusDetail, transacao, desafio3dsUrl };
   }
 
   // Cria uma preference do Checkout Pro (página de pagamento hospedada pelo
@@ -568,7 +614,7 @@ export class MercadoPagoService {
   // isolada aqui.
   private async buscarOrderComoPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
     const corpo: any = await this.chamar(`/v1/orders/${id}`, undefined, accessTokenOverride);
-    const { status, transacao } = this.interpretarOrder(corpo);
+    const { status, transacao, desafio3dsUrl } = this.interpretarOrder(corpo);
     return {
       id: String(corpo.id),
       status,
@@ -577,6 +623,7 @@ export class MercadoPagoService {
       metodoPagamento: transacao?.payment_method?.id ?? null,
       dataAprovacao: status === "approved" ? (corpo.last_updated_date ?? null) : null,
       dataCriacao: corpo.created_date,
+      desafio3dsUrl,
     };
   }
 
