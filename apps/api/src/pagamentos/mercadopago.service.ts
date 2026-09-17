@@ -540,11 +540,13 @@ export class MercadoPagoService {
     return { id: String(corpo.id), initPoint: corpo.init_point };
   }
 
-  // Ids de Order (cartão — ver criarPagamentoCartao) sempre vêm com o
-  // prefixo "ORD" do próprio Mercado Pago, o que basta pra distinguir de um
-  // id de payment clássico (Pix) sem precisar guardar mais nada no banco.
+  // A Orders API não garante que o identificador comece com "ORD".
+  // Orders do Checkout Transparente podem vir como "01JC...", enquanto
+  // pagamentos clássicos do Pix usam IDs numéricos. Detectar pelo formato
+  // evita consultar uma Order em /v1/payments e também preserva os IDs
+  // já gravados no banco.
   private ehIdDeOrder(id: string): boolean {
-    return id.startsWith("ORD");
+    return !/^\d+$/.test(String(id));
   }
 
   async buscarPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
