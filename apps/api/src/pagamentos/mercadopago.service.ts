@@ -441,36 +441,66 @@ export class MercadoPagoService {
     // aqui não iam. Adiciona os dois — a Orders API parece validar o payer
     // de forma mais rígida que a API clássica (que aceitava só e-mail+CPF).
     const [primeiroNome, ...restoNome] = params.payerNome.trim().split(/\s+/);
+    const idempotencyKey = crypto.randomUUID();
+    const payloadOrder = {
+      type: "online",
+      processing_mode: "automatic",
+      total_amount: valorFormatado,
+      external_reference: params.externalReference,
+      payer: {
+        email: params.payerEmail,
+        first_name: primeiroNome || params.payerNome,
+        last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
+        identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
+      },
+      transactions: {
+        payments: [
+          {
+            amount: valorFormatado,
+            payment_method: {
+              id: params.paymentMethodId,
+              type: "credit_card",
+              token: params.token,
+              installments: 1,
+            },
+          },
+        ],
+      },
+    };
+
+    // Diagnóstico temporário e sanitizado: não registra número do cartão, CVV
+    // nem o token completo. Não altera o payload nem o fluxo de pagamento.
+    this.logger.warn(
+      `[DIAGNOSTICO CARTAO] Order antes do envio: ${JSON.stringify({
+        type: payloadOrder.type,
+        processing_mode: payloadOrder.processing_mode,
+        total_amount: payloadOrder.total_amount,
+        external_reference: payloadOrder.external_reference,
+        payer: {
+          email_present: Boolean(params.payerEmail),
+          email_domain: params.payerEmail?.split("@")[1] ?? null,
+          first_name_present: Boolean(primeiroNome),
+          last_name_present: Boolean(restoNome.join(" ")),
+          cpf_present: Boolean(params.payerCpf.replace(/\D/g, "")),
+          cpf_length: params.payerCpf.replace(/\D/g, "").length,
+        },
+        payment_method: {
+          id: params.paymentMethodId,
+          type: "credit_card",
+          token_present: Boolean(params.token),
+          token_length: params.token?.length ?? 0,
+          installments: 1,
+        },
+        idempotency_key: idempotencyKey,
+      })}`,
+    );
+
     const corpo: any = await this.chamar(
       "/v1/orders",
       {
         method: "POST",
-        headers: { "X-Idempotency-Key": crypto.randomUUID() },
-        body: JSON.stringify({
-          type: "online",
-          processing_mode: "automatic",
-          total_amount: valorFormatado,
-          external_reference: params.externalReference,
-          payer: {
-            email: params.payerEmail,
-            first_name: primeiroNome || params.payerNome,
-            last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
-            identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
-          },
-          transactions: {
-            payments: [
-              {
-                amount: valorFormatado,
-                payment_method: {
-                  id: params.paymentMethodId,
-                  type: "credit_card",
-                  token: params.token,
-                  installments: 1,
-                },
-              },
-            ],
-          },
-        }),
+        headers: { "X-Idempotency-Key": idempotencyKey },
+        body: JSON.stringify(payloadOrder),
       },
       accessTokenOverride,
     );
@@ -539,13 +569,11 @@ export class MercadoPagoService {
     return { id: String(corpo.id), initPoint: corpo.init_point };
   }
 
-  // A Orders API não garante que o identificador comece com "ORD".
-  // Orders do Checkout Transparente podem vir como "01JC...", enquanto
-  // pagamentos clássicos do Pix usam IDs numéricos. Detectar pelo formato
-  // evita consultar uma Order em /v1/payments e também preserva os IDs
-  // já gravados no banco.
+  // Ids de Order (cartão — ver criarPagamentoCartao) sempre vêm com o
+  // prefixo "ORD" do próprio Mercado Pago, o que basta pra distinguir de um
+  // id de payment clássico (Pix) sem precisar guardar mais nada no banco.
   private ehIdDeOrder(id: string): boolean {
-    return !/^\d+$/.test(String(id));
+    return id.startsWith("ORD");
   }
 
   async buscarPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
