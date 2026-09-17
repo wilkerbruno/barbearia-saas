@@ -466,7 +466,6 @@ export class MercadoPagoService {
                   type: "credit_card",
                   token: params.token,
                   installments: 1,
-                  statement_descriptor: params.descricao.slice(0, 22),
                 },
               },
             ],
