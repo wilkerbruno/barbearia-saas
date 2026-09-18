@@ -462,6 +462,12 @@ export class MercadoPagoService {
     // window.MP_DEVICE_SESSION_ID antes do cliente confirmar o pagamento, ou
     // se está sempre expirando/falhando e o antifraude nunca recebe esse sinal.
     this.logger.log(`Cobrança com cartão: Device ID ${params.deviceId ? "presente" : "AUSENTE"} (paymentMethodId=${params.paymentMethodId})`);
+    // Log temporário (histórico "Produto sem nome", set/2026): confirma no
+    // próprio log o título do item que está de fato indo pro Mercado Pago —
+    // fecha a dúvida se o campo `items` (abaixo) está sendo mandado ou se, por
+    // algum motivo (deploy antigo, cache, etc.), a versão rodando ainda é a
+    // de antes dessa correção.
+    this.logger.log(`Cobrança com cartão: enviando items[0].title="${params.descricao.slice(0, 256)}"`);
     const corpo: any = await this.chamar(
       "/v1/orders",
       {
