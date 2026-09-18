@@ -485,15 +485,16 @@ export class MercadoPagoService {
           total_amount: valorFormatado,
           external_reference: params.externalReference,
           // HISTÓRICO (set/2026): sem isso, o Mercado Pago mostra "Produto sem
-          // nome" pro cliente nos e-mails/telas de confirmação/recusa — o
-          // campo certo pra isso é `items` (documentado na API Reference da
-          // Orders API: título aparece por conta desse campo), que não
-          // estava sendo enviado. Além de deixar mais claro pro cliente o que
-          // ele está pagando (evita ele desconfiar de um "produto sem nome" e
-          // reportar como compra não reconhecida), dar contexto real da
-          // compra tende a ajudar o antifraude do próprio Mercado Pago a
-          // avaliar a transação — uma cobrança sem nenhum item identificado
-          // é um sinal a menos de que é uma compra legítima.
+          // nome" pro cliente nos e-mails/telas de confirmação/recusa. Adicionar
+          // só `items[].title` (tentativa anterior) NÃO resolveu — confirmado
+          // em log que o título estava sendo mandado certinho mesmo assim o
+          // e-mail continuou "sem nome". A Orders API tem TAMBÉM um campo
+          // `description` separado, no nível principal da Order (fora de
+          // `items` — visto no exemplo oficial da API Reference, valor
+          // "Smartphone"), que é provavelmente o campo que esse e-mail
+          // específico usa. Manda os dois: não custa nada e cobre qualquer um
+          // dos dois templates que o Mercado Pago possa estar usando.
+          description: params.descricao.slice(0, 256),
           items: [
             {
               title: params.descricao.slice(0, 256),
