@@ -151,13 +151,7 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
               <StarRating value={barbearia.notaMedia} totalAvaliacoes={barbearia.totalAvaliacoes} size={14} />
             </View>
 
-            <Button
-              label={totalSelecionado > 0 ? `Ver horários (${totalSelecionado} selecionado${totalSelecionado === 1 ? "" : "s"})` : "Agendar horário"}
-              onPress={agendar}
-            />
-            {totalSelecionado > 0 && (
-              <Text style={styles.dica}>Toque em um serviço ou pacote pra marcar ou desmarcar.</Text>
-            )}
+            <Text style={styles.dica}>Toque em um serviço ou pacote pra marcar ou desmarcar — o botão de agendar fica no final da tela.</Text>
 
             <View style={{ gap: spacing.sm }}>
               <Text style={styles.sectionTitle}>Serviços</Text>
@@ -270,6 +264,19 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
             {item.comentario && <Text style={styles.itemMeta}>{item.comentario}</Text>}
           </Card>
         )}
+        // O botão de agendar fica como ÚLTIMA opção da tela — depois de
+        // serviços, pacotes, pacotes mensais e das avaliações — em vez de logo
+        // no topo, pra o cliente ver tudo que a barbearia oferece antes de
+        // decidir agendar (a seleção de serviços/pacotes já feita lá em cima
+        // continua valendo, só o botão que desceu pro final).
+        ListFooterComponent={
+          <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
+            <Button
+              label={totalSelecionado > 0 ? `Ver horários (${totalSelecionado} selecionado${totalSelecionado === 1 ? "" : "s"})` : "Agendar horário"}
+              onPress={agendar}
+            />
+          </View>
+        }
       />
     </SafeAreaView>
   );

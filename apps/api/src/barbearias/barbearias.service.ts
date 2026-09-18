@@ -232,6 +232,35 @@ export class BarbeariasService {
     });
     return total > 0;
   }
+
+  // Alimenta o popup de avaliação pós-atendimento do app (ver
+  // PopupAvaliacaoPendente) — olha TODAS as barbearias (não só uma) onde esse
+  // cliente já foi atendido (mesma regra de clienteJaFoiAtendido acima:
+  // horário já passou, não foi cancelado) e devolve a mais antiga que ele
+  // ainda não avaliou. Assim o popup aparece sozinho assim que o cliente
+  // reabre o app depois do horário passar, em vez de depender dele lembrar de
+  // ir na tela da barbearia avaliar manualmente. `null` quando não há nenhuma
+  // pendente (nunca foi atendido em lugar nenhum, ou já avaliou tudo).
+  async buscarAvaliacaoPendente(clienteId: string): Promise<{ barbeariaId: string; nome: string; atendidoEm: Date } | null> {
+    const atendimentos = await this.prisma.agendamento.findMany({
+      where: { clienteId, fim: { lt: new Date() }, status: { not: StatusAgendamento.CANCELADO } },
+      distinct: ["barbeariaId"],
+      orderBy: { fim: "asc" }, // a barbearia esperando avaliação há mais tempo aparece primeiro
+      select: { barbeariaId: true, fim: true, barbearia: { select: { nome: true } } },
+    });
+    if (atendimentos.length === 0) return null;
+
+    const jaAvaliadas = await this.prisma.avaliacao.findMany({
+      where: { clienteId, barbeariaId: { in: atendimentos.map((a) => a.barbeariaId) } },
+      select: { barbeariaId: true },
+    });
+    const avaliadasSet = new Set(jaAvaliadas.map((a) => a.barbeariaId));
+
+    const pendente = atendimentos.find((a) => !avaliadasSet.has(a.barbeariaId));
+    if (!pendente) return null;
+
+    return { barbeariaId: pendente.barbeariaId, nome: pendente.barbearia.nome, atendidoEm: pendente.fim };
+  }
 }
 
 // Distância em linha reta entre duas coordenadas (km). Precisão de sobra pra

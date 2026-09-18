@@ -106,6 +106,11 @@ export interface Avaliacao {
     comentario?: string | null;
     criadoEm: string;
 }
+export interface AvaliacaoPendente {
+    barbeariaId: string;
+    nome: string;
+    atendidoEm: string;
+}
 export declare const StatusAgendamento: {
     readonly PENDENTE: "PENDENTE";
     readonly CONFIRMADO: "CONFIRMADO";

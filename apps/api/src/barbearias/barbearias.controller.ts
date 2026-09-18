@@ -58,6 +58,15 @@ export class BarbeariasController {
     return this.barbeariasService.listarProximas(latitude, longitude, raioKm ? Number(raioKm) : undefined, q, user.id);
   }
 
+  // Popup de avaliação pós-atendimento (ver PopupAvaliacaoPendente no app) —
+  // não recebe id de barbearia (é por cliente, olhando todas), então também
+  // precisa vir ANTES de ":id" pelo mesmo motivo de "proximas" acima.
+  @Roles(Papel.CLIENTE)
+  @Get("avaliacao-pendente")
+  buscarAvaliacaoPendente(@CurrentUser() user: AuthUser) {
+    return this.barbeariasService.buscarAvaliacaoPendente(user.id);
+  }
+
   // Público: dados mínimos pra Home do app do cliente (nome, endereço, estrelas).
   @Public()
   @Get(":id/publico")

@@ -169,6 +169,18 @@ export class WebhooksService {
         where: { grupoId: pagamento.grupoId, status: StatusAgendamento.PENDENTE },
         data: { status: StatusAgendamento.CONFIRMADO },
       });
+    } else if (novoStatus === StatusPagamento.RECUSADO && pagamento.grupoId) {
+      // Mesmo bug corrigido em AgendamentosService.sincronizarPagamentoComGateway
+      // (o poll que o app faz) — esse webhook tem a MESMA lógica duplicada e o
+      // mesmo buraco: só desfazia a reserva quando o pagamento era aprovado,
+      // nunca quando era recusado. Uma recusa que o Mercado Pago só decide
+      // depois da criação (webhook chega com "rejected"/"failed") deixava o
+      // Agendamento preso em PENDENTE, bloqueando o horário por até
+      // PENDENTE_EXPIRA_MINUTOS mesmo já sabendo que não vai ser pago.
+      await this.prisma.agendamento.updateMany({
+        where: { grupoId: pagamento.grupoId, status: StatusAgendamento.PENDENTE },
+        data: { status: StatusAgendamento.CANCELADO },
+      });
     }
   }
 }

@@ -161,6 +161,18 @@ export interface Avaliacao {
   criadoEm: string;
 }
 
+// Devolvida por GET /barbearias/avaliacao-pendente (ver
+// BarbeariasService.buscarAvaliacaoPendente) — a barbearia mais antiga onde o
+// cliente já foi atendido (horário já passou, não cancelado) e ainda não
+// avaliou. É o que alimenta o popup de avaliação pós-atendimento no app (ver
+// PopupAvaliacaoPendente), que aparece sozinho ao abrir/voltar pro app em vez
+// de depender do cliente lembrar de ir na tela da barbearia avaliar.
+export interface AvaliacaoPendente {
+  barbeariaId: string;
+  nome: string;
+  atendidoEm: string; // ISO — horário (fim) do atendimento que liberou a avaliação
+}
+
 // ============================= AGENDAMENTOS =============================
 
 // Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).

@@ -520,6 +520,23 @@ export class AgendamentosService {
         where: { grupoId: atualizado.grupoId, status: StatusAgendamento.PENDENTE },
         data: { status: StatusAgendamento.CONFIRMADO },
       });
+    } else if (novoStatus === StatusPagamento.RECUSADO && atualizado.grupoId) {
+      // BUG (set/2026): quando a recusa é descoberta só DEPOIS da criação —
+      // ex: Order que nasce "pending"/"pending_review_manual" e vira "failed"
+      // (high_risk) alguns segundos depois, achado aqui pelo poll/webhook, não
+      // na criação (ver criarPagamentoCartao/criarLote, que JÁ cancelava
+      // nesse outro caminho) — faltava esse `else if`: o Agendamento ficava
+      // PENDENTE, e `filtroStatusAtivo()` trata PENDENTE recente como
+      // ocupando o horário por até PENDENTE_EXPIRA_MINUTOS. Resultado: o
+      // cliente tentava agendar de novo no mesmo horário na hora e recebia
+      // "esse horário acabou de ser reservado" — mesmo o pagamento já tendo
+      // sido definitivamente recusado. Libera o horário na hora, igual já
+      // acontece nos outros dois caminhos de recusa (criarLote e
+      // cancelarPagamentoPendente).
+      await this.prisma.agendamento.updateMany({
+        where: { grupoId: atualizado.grupoId, status: StatusAgendamento.PENDENTE },
+        data: { status: StatusAgendamento.CANCELADO },
+      });
     }
     return atualizado;
   }
