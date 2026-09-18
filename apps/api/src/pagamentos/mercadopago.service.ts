@@ -456,6 +456,12 @@ export class MercadoPagoService {
     // aqui não iam. Adiciona os dois — a Orders API parece validar o payer
     // de forma mais rígida que a API clássica (que aceitava só e-mail+CPF).
     const [primeiroNome, ...restoNome] = params.payerNome.trim().split(/\s+/);
+    // Registra só SE o Device ID chegou até aqui (nunca o valor em si, que é
+    // um identificador de sessão) — fecha a dúvida se a WebView oculta do app
+    // (ver CartaoScreen) está de fato conseguindo capturar o
+    // window.MP_DEVICE_SESSION_ID antes do cliente confirmar o pagamento, ou
+    // se está sempre expirando/falhando e o antifraude nunca recebe esse sinal.
+    this.logger.log(`Cobrança com cartão: Device ID ${params.deviceId ? "presente" : "AUSENTE"} (paymentMethodId=${params.paymentMethodId})`);
     const corpo: any = await this.chamar(
       "/v1/orders",
       {
