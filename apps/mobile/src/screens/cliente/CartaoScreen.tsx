@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { WebView } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { AgendamentoLoteCriado, BarbeariaPublica, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
@@ -10,6 +11,40 @@ import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Cartao">;
+
+// Página mínima carregada numa WebView OCULTA (nunca aparece na tela) só pra
+// rodar o script antifraude do próprio Mercado Pago (security.js) — ele
+// precisa de um DOM/`window` de verdade, que o React Native não tem
+// nativamente, daí a WebView. Assim que o script preenche
+// `window.MP_DEVICE_SESSION_ID`, manda esse valor de volta pro app via
+// `postMessage` (ver onMessage abaixo) — é esse id que vai no header
+// X-Meli-Session-Id da cobrança (ver MercadoPagoService.criarPagamentoCartao),
+// ajudando o antifraude do MP a avaliar melhor o risco (ver histórico de
+// recusas "high_risk"). Se o script não carregar/demorar demais (sem
+// internet, bloqueio de rede etc.), manda uma mensagem vazia depois de um
+// tempo — a coleta é só um extra, nunca pode travar o pagamento.
+const HTML_DEVICE_ID = `
+<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8" /></head>
+  <body>
+    <script src="https://www.mercadopago.com/v2/security.js" view="checkout"></script>
+    <script>
+      var tentativas = 0;
+      var intervalo = setInterval(function () {
+        tentativas++;
+        if (window.MP_DEVICE_SESSION_ID) {
+          clearInterval(intervalo);
+          window.ReactNativeWebView.postMessage(window.MP_DEVICE_SESSION_ID);
+        } else if (tentativas > 25) {
+          clearInterval(intervalo);
+          window.ReactNativeWebView.postMessage("");
+        }
+      }, 200);
+    </script>
+  </body>
+</html>
+`;
 
 // Formulário nativo de cartão — o cliente digita os dados AQUI, dentro do
 // app, e eles nunca chegam ao nosso servidor: primeiro tokenizamos direto
@@ -30,6 +65,11 @@ export function CartaoScreen({ route, navigation }: Props) {
   const [nomeTitular, setNomeTitular] = useState("");
   const [cpf, setCpf] = useState("");
   const [enviando, setEnviando] = useState(false);
+
+  // Id do aparelho coletado pela WebView oculta (ver HTML_DEVICE_ID acima) —
+  // fica null até o script terminar (ou desistir); nesse meio tempo o
+  // pagamento pode ser confirmado normalmente sem esperar por ele.
+  const [deviceId, setDeviceId] = useState<string | null>(null);
 
   // Bandeira reconhecida AO VIVO, direto dos dígitos já digitados — sem
   // nenhuma chamada de rede (ver identificarBandeiraLocal no pacote
@@ -114,6 +154,7 @@ export function CartaoScreen({ route, navigation }: Props) {
         cartaoToken: corpoToken.id,
         cartaoBin: numeroLimpo.slice(0, 6),
         cartaoCpf: cpf.replace(/\D/g, ""),
+        cartaoDeviceId: deviceId ?? undefined,
       });
 
       if (data.pagamento) {
@@ -134,6 +175,15 @@ export function CartaoScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      {/* Invisível de propósito — só existe pra rodar o security.js do
+          Mercado Pago em segundo plano (ver HTML_DEVICE_ID acima). */}
+      <View style={styles.webviewOculta} pointerEvents="none">
+        <WebView
+          source={{ html: HTML_DEVICE_ID }}
+          onMessage={(evento) => setDeviceId(evento.nativeEvent.data || null)}
+          javaScriptEnabled
+        />
+      </View>
       <ScrollView contentContainerStyle={styles.content}>
         <Card style={{ alignItems: "center", gap: spacing.xs }}>
           <Text style={styles.label}>Valor a pagar</Text>
@@ -255,6 +305,7 @@ function formatarCpf(valor: string): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  webviewOculta: { position: "absolute", width: 1, height: 1, opacity: 0 },
   content: { padding: spacing.xl, gap: spacing.md, paddingBottom: spacing.xxl },
   sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.inkMuted, textTransform: "uppercase", marginTop: spacing.md },
   label: { fontSize: 12, color: colors.inkMuted },

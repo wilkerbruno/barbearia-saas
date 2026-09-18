@@ -421,6 +421,13 @@ export class MercadoPagoService {
       payerEmail: string;
       payerCpf: string;
       payerNome: string;
+      // Device ID gerado pelo script antifraude do próprio Mercado Pago
+      // (window.MP_DEVICE_SESSION_ID, capturado numa WebView oculta em
+      // CartaoScreen) — mandado no header X-Meli-Session-Id abaixo quando
+      // presente. Ajuda o antifraude a avaliar melhor o risco da transação
+      // (ver histórico de "high_risk" logo abaixo); opcional porque a coleta
+      // no app pode falhar/expirar sem impedir o pagamento.
+      deviceId?: string;
     },
     accessTokenOverride: string,
   ): Promise<CartaoPagamentoCriado> {
@@ -453,7 +460,13 @@ export class MercadoPagoService {
       "/v1/orders",
       {
         method: "POST",
-        headers: { "X-Idempotency-Key": crypto.randomUUID() },
+        headers: {
+          "X-Idempotency-Key": crypto.randomUUID(),
+          // Device ID (ver comentário no parâmetro `deviceId` acima) — só
+          // manda o header quando a coleta no app deu certo; omitir é
+          // melhor do que mandar vazio/inválido.
+          ...(params.deviceId ? { "X-Meli-Session-Id": params.deviceId } : {}),
+        },
         body: JSON.stringify({
           type: "online",
           processing_mode: "automatic",

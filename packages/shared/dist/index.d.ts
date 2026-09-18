@@ -172,6 +172,7 @@ export interface CriarAgendamentoLoteInput {
     cartaoToken?: string;
     cartaoBin?: string;
     cartaoCpf?: string;
+    cartaoDeviceId?: string;
 }
 export interface CriarAgendamentoManualInput {
     funcionarioId: string;

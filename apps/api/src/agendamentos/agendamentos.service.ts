@@ -200,6 +200,7 @@ export class AgendamentosService {
             payerEmail: cliente.email,
             payerCpf: dto.cartaoCpf,
             payerNome: cliente.nome,
+            deviceId: dto.cartaoDeviceId,
           },
           tokenBarbearia,
         );

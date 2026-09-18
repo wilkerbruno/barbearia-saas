@@ -68,4 +68,14 @@ export class CreateAgendamentoLoteDto {
   @ValidateIf((dto) => dto.metodoPagamento === MetodoPagamento.CARTAO)
   @IsString()
   cartaoCpf?: string;
+
+  // Identificador do aparelho gerado pelo script antifraude do Mercado Pago
+  // (window.MP_DEVICE_SESSION_ID, capturado numa WebView oculta em
+  // CartaoScreen) — ajuda o antifraude do MP a avaliar risco (ver histórico
+  // de rejeições "high_risk" em MercadoPagoService.criarPagamentoCartao).
+  // Não é obrigatório: a coleta pode falhar ou expirar sem impedir o
+  // pagamento, então não pode bloquear o cliente que não conseguiu gerá-lo.
+  @IsOptional()
+  @IsString()
+  cartaoDeviceId?: string;
 }

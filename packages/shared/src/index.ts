@@ -265,6 +265,13 @@ export interface CriarAgendamentoLoteInput {
   cartaoToken?: string; // token de uso único gerado pelo SDK/API do Mercado Pago no aparelho
   cartaoBin?: string; // 6 primeiros dígitos do cartão, usados pra identificar a bandeira
   cartaoCpf?: string; // CPF do titular, exigido pelo Mercado Pago em pagamentos com cartão
+  // Identificador do aparelho gerado pelo script antifraude do Mercado Pago
+  // (window.MP_DEVICE_SESSION_ID via https://www.mercadopago.com/v2/security.js,
+  // capturado numa WebView oculta em CartaoScreen — ver X-Meli-Session-Id em
+  // MercadoPagoService.criarPagamentoCartao). Ajuda o antifraude do MP a
+  // avaliar o risco da transação (histórico de rejeições "high_risk"); opcional
+  // porque a coleta pode falhar/expirar sem impedir o pagamento.
+  cartaoDeviceId?: string;
 }
 
 // Corpo de POST /agendamentos/manual (lançado pela própria barbearia — ver
