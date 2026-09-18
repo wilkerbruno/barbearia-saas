@@ -525,6 +525,20 @@ export class MercadoPagoService {
       accessTokenOverride,
     );
     const { status, statusDetail, desafio3dsUrl } = this.interpretarOrder(corpo);
+    // HISTÓRICO (investigação "high_risk", set/2026): quando o Mercado Pago
+    // recusa a Order já na criação (HTTP não-2xx), o `chamar()` acima loga um
+    // ERROR sozinho. Mas quando a criação responde OK (2xx) e a Order já vem
+    // com o pagamento "failed"/"rejected" dentro do corpo — sem nenhum erro
+    // de transporte —, esse caminho passava batido, sem nenhum log, dando a
+    // falsa impressão de que a tentativa "sumiu" (foi o que aconteceu num
+    // teste de R$40 que não apareceu em log nenhum). Registra aqui sempre que
+    // o resultado não for aprovação na hora, pra nenhuma tentativa ficar
+    // invisível independente do valor ou do motivo.
+    if (status !== "approved") {
+      this.logger.warn(
+        `Order ${corpo.id} criada sem recusa de transporte, mas resultado não aprovado: status=${status} statusDetail=${statusDetail} valor=${valorFormatado} paymentMethodId=${params.paymentMethodId}`,
+      );
+    }
     // Guarda o id da ORDER (prefixo "ORD...", não o id do pagamento aninhado
     // dentro dela) — é esse id que fica salvo em Pagamento.gatewayPagamentoId
     // e usado depois em buscarPayment/estornarPagamento, que reconhecem esse
@@ -627,7 +641,15 @@ export class MercadoPagoService {
   // isolada aqui.
   private async buscarOrderComoPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
     const corpo: any = await this.chamar(`/v1/orders/${id}`, undefined, accessTokenOverride);
-    const { status, transacao, desafio3dsUrl } = this.interpretarOrder(corpo);
+    const { status, statusDetail, transacao, desafio3dsUrl } = this.interpretarOrder(corpo);
+    // Mesmo histórico do comentário em criarPagamentoCartao: uma recusa
+    // descoberta só AQUI (Order criada normalmente, mas que virou
+    // "failed"/"rejected" depois, entre a criação e esse polling) nunca
+    // passava pelo log de ERROR do `chamar()` — essa consulta em si é um 200
+    // OK. Registra pra essas recusas assíncronas também ficarem visíveis.
+    if (status === "rejected") {
+      this.logger.warn(`Order ${id} consultada via polling/webhook veio recusada: statusDetail=${statusDetail}`);
+    }
     return {
       id: String(corpo.id),
       status,
