@@ -111,9 +111,19 @@ export class AgendamentosService {
     // — evita reservar o horário só pra descobrir depois que não dá pra cobrar.
     const tokenBarbearia = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
 
-    const [cliente, barbearia] = await Promise.all([
+    const [cliente, barbearia, ultimoPagamentoAprovado] = await Promise.all([
       this.prisma.usuario.findUnique({ where: { id: clienteId } }),
       this.prisma.barbearia.findUnique({ where: { id: barbeariaId } }),
+      // Só pra montar additional_info.payer da cobrança com cartão abaixo
+      // (ver MercadoPagoService.criarPagamentoCartao) — busca em paralelo com
+      // o resto pra não atrasar o fluxo de Pix, que não usa esse dado.
+      // atualizadoEm é usado como proxy de "quando foi aprovado" porque
+      // Pagamento não guarda uma data de aprovação separada — é atualizado
+      // exatamente quando o status muda pra APROVADO (ver mais abaixo).
+      this.prisma.pagamento.findFirst({
+        where: { clienteId, status: StatusPagamento.APROVADO },
+        orderBy: { atualizadoEm: "desc" },
+      }),
     ]);
     if (!cliente) throw new NotFoundException("Cliente não encontrado.");
 
@@ -200,7 +210,12 @@ export class AgendamentosService {
             payerEmail: cliente.email,
             payerCpf: dto.cartaoCpf,
             payerNome: cliente.nome,
+            payerTelefone: cliente.telefone,
             deviceId: dto.cartaoDeviceId,
+            payerCadastradoEm: cliente.criadoEm,
+            payerPrimeiraCompra: !ultimoPagamentoAprovado,
+            payerUltimaCompraEm: ultimoPagamentoAprovado?.atualizadoEm ?? null,
+            dataAgendamento: inicio,
           },
           tokenBarbearia,
         );

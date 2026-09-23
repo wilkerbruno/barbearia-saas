@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
@@ -66,10 +66,26 @@ export function CartaoScreen({ route, navigation }: Props) {
   const [cpf, setCpf] = useState("");
   const [enviando, setEnviando] = useState(false);
 
-  // Id do aparelho coletado pela WebView oculta (ver HTML_DEVICE_ID acima) —
-  // fica null até o script terminar (ou desistir); nesse meio tempo o
-  // pagamento pode ser confirmado normalmente sem esperar por ele.
-  const [deviceId, setDeviceId] = useState<string | null>(null);
+  // Id do aparelho coletado pela WebView oculta (ver HTML_DEVICE_ID acima).
+  // Usa ref (não state) porque só é lido dentro de confirmar(), nunca
+  // renderizado — e porque confirmar() precisa enxergar o valor mais
+  // recente mesmo estando no meio de uma função async já em execução (um
+  // state capturado no início da função ficaria "congelado" no valor de
+  // quando confirmar() foi chamada).
+  //
+  // HISTÓRICO (ticket WCS-50070, set/2026): o Mercado Pago pediu pra garantir
+  // que o Device ID (X-Meli-Session-Id) vá em 100% das cobranças, não só
+  // quando calhar de já estar pronto. Antes, `confirmar()` seguia direto pro
+  // pagamento com o que `deviceId` state tivesse NA HORA do toque em "Pagar
+  // agora" — como a WebView só populava esse state quando o script
+  // antifraude terminava (até 5s, ver HTML_DEVICE_ID), um cliente rápido
+  // (autofill, cartão salvo) podia disparar o pagamento antes disso, e o
+  // header saía sem o dado. `deviceIdResolvidoRef` guarda se a coleta JÁ
+  // terminou (com sucesso ou não) — `aguardarDeviceId` abaixo espera esse
+  // sinal antes de seguir com o pagamento, em vez de simplesmente ler o
+  // valor atual e continuar.
+  const deviceIdRef = useRef<string | null>(null);
+  const deviceIdResolvidoRef = useRef(false);
 
   // Bandeira reconhecida AO VIVO, direto dos dígitos já digitados — sem
   // nenhuma chamada de rede (ver identificarBandeiraLocal no pacote
@@ -101,6 +117,30 @@ export function CartaoScreen({ route, navigation }: Props) {
     return null;
   }
 
+  // Espera a coleta do Device ID terminar (ver deviceIdResolvidoRef acima) —
+  // a própria WebView oculta já desiste sozinha depois de ~5s (25 tentativas
+  // x 200ms, ver HTML_DEVICE_ID), então esse limite é só uma folga de
+  // segurança por cima disso; na prática, como a WebView monta junto com a
+  // tela (bem antes do cliente terminar de digitar os dados do cartão), a
+  // coleta quase sempre já terminou bem antes de chegar aqui, e essa espera
+  // não chega a ser percebida.
+  function aguardarDeviceId(): Promise<void> {
+    return new Promise((resolve) => {
+      if (deviceIdResolvidoRef.current) {
+        resolve();
+        return;
+      }
+      const limiteMs = 6000;
+      const inicio = Date.now();
+      const intervalo = setInterval(() => {
+        if (deviceIdResolvidoRef.current || Date.now() - inicio > limiteMs) {
+          clearInterval(intervalo);
+          resolve();
+        }
+      }, 100);
+    });
+  }
+
   async function confirmar() {
     if (!publicKey) {
       Alert.alert(
@@ -117,6 +157,10 @@ export function CartaoScreen({ route, navigation }: Props) {
 
     setEnviando(true);
     try {
+      // Ver comentário em aguardarDeviceId/deviceIdResolvidoRef acima —
+      // garante que o pagamento só segue depois que a coleta do Device ID
+      // já terminou (com ou sem sucesso), nunca no meio dela.
+      await aguardarDeviceId();
       const numeroLimpo = numero.replace(/\s/g, "");
       const [mes, anoCurto] = validade.split("/").map((p) => p.trim());
       const anoCompleto = 2000 + Number(anoCurto);
@@ -154,7 +198,7 @@ export function CartaoScreen({ route, navigation }: Props) {
         cartaoToken: corpoToken.id,
         cartaoBin: numeroLimpo.slice(0, 6),
         cartaoCpf: cpf.replace(/\D/g, ""),
-        cartaoDeviceId: deviceId ?? undefined,
+        cartaoDeviceId: deviceIdRef.current ?? undefined,
       });
 
       if (data.pagamento) {
@@ -180,7 +224,15 @@ export function CartaoScreen({ route, navigation }: Props) {
       <View style={styles.webviewOculta} pointerEvents="none">
         <WebView
           source={{ html: HTML_DEVICE_ID }}
-          onMessage={(evento) => setDeviceId(evento.nativeEvent.data || null)}
+          onMessage={(evento) => {
+            // evento.nativeEvent.data vem "" quando a WebView desistiu sem
+            // conseguir capturar (ver HTML_DEVICE_ID) — nesse caso o ref fica
+            // null mesmo, mas deviceIdResolvidoRef marca que a espera em
+            // aguardarDeviceId() acima pode parar (não tem mais nada a
+            // esperar, mesmo sem sucesso).
+            deviceIdRef.current = evento.nativeEvent.data || null;
+            deviceIdResolvidoRef.current = true;
+          }}
           javaScriptEnabled
         />
       </View>

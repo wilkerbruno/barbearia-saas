@@ -421,6 +421,15 @@ export class MercadoPagoService {
       payerEmail: string;
       payerCpf: string;
       payerNome: string;
+      // Telefone do cliente (Usuario.telefone) — opcional porque nem todo
+      // cadastro antigo tem telefone preenchido. Enviado em payer.phone (ver
+      // corpo da Order abaixo) por recomendação oficial do próprio Mercado
+      // Pago pra melhorar a avaliação de risco/aprovação (doc "Checkout
+      // Transparente via Orders > Payment management > Improve payment
+      // approval > Recommendations": manda o máximo de dado do comprador
+      // possível) — investigação de recusas "high_risk" (ver HISTÓRICO no
+      // corpo da Order logo abaixo) apontou esse campo como ausente.
+      payerTelefone?: string | null;
       // Device ID gerado pelo script antifraude do próprio Mercado Pago
       // (window.MP_DEVICE_SESSION_ID, capturado numa WebView oculta em
       // CartaoScreen) — mandado no header X-Meli-Session-Id abaixo quando
@@ -428,6 +437,21 @@ export class MercadoPagoService {
       // (ver histórico de "high_risk" logo abaixo); opcional porque a coleta
       // no app pode falhar/expirar sem impedir o pagamento.
       deviceId?: string;
+      // Bloco `additional_info` (ver corpo da Order abaixo) — pedido
+      // explícito do suporte do Mercado Pago (ticket WCS-50070, set/2026)
+      // depois de analisar Orders recusadas com "high_risk": além do que já
+      // ia no `payer`, eles pedem dado real de cadastro/histórico de compra
+      // do comprador pro antifraude ter mais sinal pra decidir (em vez de
+      // recusar direto por falta de informação). Vem calculado por quem
+      // chama (AgendamentosService), que tem acesso ao histórico de
+      // pagamentos do cliente — este service não deveria consultar o Prisma
+      // diretamente por conta própria pra montar isso.
+      payerCadastradoEm: Date;
+      payerPrimeiraCompra: boolean;
+      payerUltimaCompraEm?: Date | null;
+      // Data/hora do agendamento sendo pago — vai em items[0].event_date
+      // (também pedido no mesmo ticket, "quando disponível").
+      dataAgendamento?: Date;
     },
     accessTokenOverride: string,
   ): Promise<CartaoPagamentoCriado> {
@@ -462,6 +486,9 @@ export class MercadoPagoService {
     // window.MP_DEVICE_SESSION_ID antes do cliente confirmar o pagamento, ou
     // se está sempre expirando/falhando e o antifraude nunca recebe esse sinal.
     this.logger.log(`Cobrança com cartão: Device ID ${params.deviceId ? "presente" : "AUSENTE"} (paymentMethodId=${params.paymentMethodId})`);
+    // Idem, pro telefone (ver comentário no payer.phone abaixo) — cadastros
+    // antigos podem não ter telefone preenchido.
+    this.logger.log(`Cobrança com cartão: telefone do pagador ${params.payerTelefone ? "presente" : "AUSENTE"}`);
     // Log temporário (histórico "Produto sem nome", set/2026): confirma no
     // próprio log o título do item que está de fato indo pro Mercado Pago —
     // fecha a dúvida se o campo `items` (abaixo) está sendo mandado ou se, por
@@ -500,13 +527,60 @@ export class MercadoPagoService {
               title: params.descricao.slice(0, 256),
               quantity: 1,
               unit_price: valorFormatado,
+              // external_code/description/event_date (ticket WCS-50070): o
+              // Mercado Pago pediu pra "detalhar o serviço nos itens, com
+              // código externo, descrição e, quando disponível, a data do
+              // agendamento" — usa o mesmo external_reference da Order como
+              // código externo do item (não temos um id de produto separado,
+              // já que cada Order cobre exatamente 1 "produto": o
+              // agendamento em si).
+              external_code: params.externalReference,
+              description: params.descricao.slice(0, 256),
+              // "services" é o category_id documentado pelo próprio Mercado
+              // Pago pra negócio de serviço (usado nas páginas de "dados de
+              // indústria" de Aplicativos/Plataformas Online e de Serviços
+              // Governamentais e Públicos) — não existe categoria dedicada a
+              // beleza/serviços pessoais, então "services" é o mais correto
+              // pra um agendamento de barbearia (não é produto físico, não
+              // se encaixa em "fashion"/"phones"/"home" etc.).
+              category_id: "services",
+              ...(params.dataAgendamento ? { event_date: params.dataAgendamento.toISOString() } : {}),
             },
           ],
+          // additional_info.payer (ver comentário nos parâmetros
+          // payerCadastradoEm/payerPrimeiraCompra/payerUltimaCompraEm acima)
+          // — dado real do comprador, nunca fictício (exigência explícita do
+          // suporte: "pedimos apenas que não sejam enviados dados
+          // fictícios"). authentication_type "MOBILE" é fixo porque esse
+          // fluxo só existe dentro do app nativo (CartaoScreen) — não tem
+          // como o pagamento chegar aqui vindo de outro lugar.
+          additional_info: {
+            payer: {
+              registration_date: params.payerCadastradoEm.toISOString(),
+              authentication_type: "MOBILE",
+              is_first_purchase_online: params.payerPrimeiraCompra,
+              ...(params.payerUltimaCompraEm ? { last_purchase: params.payerUltimaCompraEm.toISOString() } : {}),
+            },
+          },
           payer: {
             email: params.payerEmail,
             first_name: primeiroNome || params.payerNome,
             last_name: restoNome.join(" ") || primeiroNome || params.payerNome,
             identification: { type: "CPF", number: params.payerCpf.replace(/\D/g, "") },
+            // phone (ver comentário no parâmetro payerTelefone acima) — só
+            // manda quando o cadastro tem telefone; a Orders API aceita o
+            // payer sem esse campo, mas quanto mais dado do comprador, melhor
+            // pro antifraude deles avaliar o risco real da transação em vez
+            // de recusar direto por falta de sinal (nosso caso: cc marketplace
+            // nova, sem histórico). DDD é sempre os 2 primeiros dígitos no
+            // Brasil, independente do número local ter 8 ou 9 dígitos — não
+            // dá pra usar um slice fixo a partir do fim pros dois casos.
+            ...((params.payerTelefone?.replace(/\D/g, "").length ?? 0) >= 10
+              ? (() => {
+                  const digitos = params.payerTelefone!.replace(/\D/g, "");
+                  return { phone: { area_code: digitos.slice(0, 2), number: digitos.slice(2) } };
+                })()
+              : {}),
           },
           // HISTÓRICO (pagamento recusado de cara com status_detail
           // "high_risk", mesmo em tentativas legítimas com cartão/CPF/valor
