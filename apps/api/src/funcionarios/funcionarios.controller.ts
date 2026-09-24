@@ -77,4 +77,41 @@ export class FuncionariosController {
   removerMinhaFolga(@Param("id") id: string, @CurrentUser() user: AuthUser) {
     return this.funcionariosService.removerMinhaFolga(user.id, id);
   }
+
+  // ---------- Horário de trabalho / folgas de um funcionário (o dono da barbearia) ----------
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @Get(":id/horarios")
+  horariosDoFuncionario(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.funcionariosService.listarHorariosDoFuncionario(id, user.barbeariaId);
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @Post(":id/horarios")
+  definirHorariosDoFuncionario(@Param("id") id: string, @Body() dto: DefinirHorariosDto, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.funcionariosService.definirHorariosDoFuncionario(id, user.barbeariaId, dto);
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @Get(":id/folgas")
+  folgasDoFuncionario(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.funcionariosService.listarFolgasDoFuncionario(id, user.barbeariaId);
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @Post(":id/folgas")
+  criarFolgaDoFuncionario(@Param("id") id: string, @Body() dto: CreateFolgaDto, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.funcionariosService.criarFolgaDoFuncionario(id, user.barbeariaId, dto);
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @Delete(":id/folgas/:folgaId")
+  removerFolgaDoFuncionario(@Param("id") id: string, @Param("folgaId") folgaId: string, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.funcionariosService.removerFolgaDoFuncionario(id, user.barbeariaId, folgaId);
+  }
 }

@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react";
 import { Alert, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { FuncionarioDetalhado } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
@@ -9,6 +10,9 @@ import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { PasswordInput } from "../../components/PasswordInput";
 import { colors, radius, spacing } from "../../theme/tokens";
+import { MaisStackParamList } from "../../navigation/MaisStack";
+
+type Props = NativeStackScreenProps<MaisStackParamList, "Equipe">;
 
 const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", cargo: "", comissaoPercentual: "60" };
 
@@ -21,7 +25,7 @@ interface Assinatura {
 // funcionário organiza a própria agenda (horário de trabalho e folgas) depois
 // de logar (ver HorariosScreen no app do funcionário). A quantidade de
 // funcionários ativos respeita o limite do plano contratado (ver garantirDentroDoLimiteDoPlano na API).
-export function EquipeScreen() {
+export function EquipeScreen({ navigation }: Props) {
   const [funcionarios, setFuncionarios] = useState<FuncionarioDetalhado[]>([]);
   const [assinatura, setAssinatura] = useState<Assinatura | null>(null);
   const [formAberto, setFormAberto] = useState(false);
@@ -173,9 +177,17 @@ export function EquipeScreen() {
                 {!item.disponivel && <Text style={styles.meta}>Indisponível para novos agendamentos</Text>}
               </View>
             </View>
-            <Text style={styles.acaoSecundaria} onPress={() => alternarAtivo(item)}>
-              {item.ativo ? "Desativar" : "Ativar"}
-            </Text>
+            <View style={{ flexDirection: "row", gap: spacing.lg }}>
+              <Text
+                style={styles.acaoPrimaria}
+                onPress={() => navigation.navigate("FuncionarioHorarios", { funcionarioId: item.id, nome: item.usuario.nome })}
+              >
+                Horários e folgas
+              </Text>
+              <Text style={styles.acaoSecundaria} onPress={() => alternarAtivo(item)}>
+                {item.ativo ? "Desativar" : "Ativar"}
+              </Text>
+            </View>
           </Card>
         )}
       />
@@ -201,6 +213,7 @@ const styles = StyleSheet.create({
   hint: { fontSize: 12, color: colors.inkMuted },
   name: { fontWeight: "700", color: colors.ink, fontSize: 14 },
   meta: { fontSize: 12, color: colors.inkMuted, marginTop: 2 },
+  acaoPrimaria: { color: colors.accent, fontWeight: "700", fontSize: 12 },
   acaoSecundaria: { color: colors.inkMuted, fontWeight: "700", fontSize: 12 },
   input: {
     borderWidth: 1,

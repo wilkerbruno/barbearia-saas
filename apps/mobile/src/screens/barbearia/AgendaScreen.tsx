@@ -1,34 +1,58 @@
 import React, { useCallback, useState } from "react";
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { Agendamento, StatusAgendamento } from "@barbearia-saas/shared";
+import { Ionicons } from "@expo/vector-icons";
+import { Agendamento, FuncionarioDetalhado, StatusAgendamento } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Card } from "../../components/Card";
 import { PriceTag } from "../../components/PriceTag";
 import { StatusBadge } from "../../components/StatusBadge";
-import { colors, spacing } from "../../theme/tokens";
+import { colors, radius, spacing } from "../../theme/tokens";
 import { AgendaStackParamList } from "../../navigation/AgendaStack";
 
 type Props = NativeStackScreenProps<AgendaStackParamList, "Agenda">;
 
-// Agenda consolidada de todos os funcionários (filtro por profissional é um
-// próximo passo simples: passar ?funcionarioId= pra este mesmo endpoint).
+function hojeIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function somarDias(dataIso: string, dias: number): string {
+  const data = new Date(`${dataIso}T00:00:00`);
+  data.setDate(data.getDate() + dias);
+  return data.toISOString().slice(0, 10);
+}
+
+function formatarDataExibicao(dataIso: string): string {
+  if (dataIso === hojeIso()) return "Hoje";
+  const [ano, mes, dia] = dataIso.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+// Agenda consolidada da barbearia — o dono pode navegar entre dias e filtrar
+// por um funcionário específico (ambos aceitos pelo endpoint desde sempre,
+// ver AgendamentosController.agendaBarbearia; só faltava esta tela usá-los).
 export function BarbeariaAgendaScreen({ navigation }: Props) {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
+  const [funcionarios, setFuncionarios] = useState<FuncionarioDetalhado[]>([]);
+  const [data, setData] = useState(hojeIso());
+  const [funcionarioId, setFuncionarioId] = useState<string | undefined>(undefined);
   const [carregando, setCarregando] = useState(true);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
-      const hoje = new Date().toISOString().slice(0, 10);
-      const { data } = await api.get<Agendamento[]>("/agendamentos/agenda-barbearia", { params: { data: hoje } });
-      setAgendamentos(data);
+      const [agendaRes, funcionariosRes] = await Promise.all([
+        api.get<Agendamento[]>("/agendamentos/agenda-barbearia", { params: { data, funcionarioId } }),
+        api.get<FuncionarioDetalhado[]>("/funcionarios"),
+      ]);
+      setAgendamentos(agendaRes.data);
+      setFuncionarios(funcionariosRes.data);
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [data, funcionarioId]);
 
   useFocusEffect(useCallback(() => { carregar(); }, [carregar]));
 
@@ -40,18 +64,49 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Agenda de hoje</Text>
+        <Text style={styles.title}>Agenda da equipe</Text>
         <Text style={styles.addButton} onPress={() => navigation.navigate("AgendarManual")}>
           + Novo
         </Text>
       </View>
+
+      <View style={styles.navData}>
+        <Pressable onPress={() => setData((d) => somarDias(d, -1))} hitSlop={8}>
+          <Ionicons name="chevron-back" size={22} color={colors.ink} />
+        </Pressable>
+        <Text style={styles.dataLabel}>{formatarDataExibicao(data)}</Text>
+        <Pressable onPress={() => setData((d) => somarDias(d, 1))} hitSlop={8}>
+          <Ionicons name="chevron-forward" size={22} color={colors.ink} />
+        </Pressable>
+        {data !== hojeIso() && (
+          <Text style={styles.hojeButton} onPress={() => setData(hojeIso())}>
+            Hoje
+          </Text>
+        )}
+      </View>
+
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chips}>
+        <Pressable style={[styles.chip, !funcionarioId && styles.chipAtivo]} onPress={() => setFuncionarioId(undefined)}>
+          <Text style={[styles.chipLabel, !funcionarioId && styles.chipLabelAtivo]}>Todos</Text>
+        </Pressable>
+        {funcionarios.map((f) => (
+          <Pressable
+            key={f.id}
+            style={[styles.chip, funcionarioId === f.id && styles.chipAtivo]}
+            onPress={() => setFuncionarioId(f.id)}
+          >
+            <Text style={[styles.chipLabel, funcionarioId === f.id && styles.chipLabelAtivo]}>{f.usuario.nome}</Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
       <FlatList
         data={agendamentos}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         refreshing={carregando}
         onRefresh={carregar}
-        ListEmptyComponent={!carregando ? <Text style={styles.empty}>Nenhum agendamento hoje.</Text> : null}
+        ListEmptyComponent={!carregando ? <Text style={styles.empty}>Nenhum agendamento neste dia.</Text> : null}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, gap: spacing.xs }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -89,6 +144,28 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: "800", color: colors.ink },
   addButton: { color: colors.accent, fontWeight: "700" },
+  navData: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  dataLabel: { fontSize: 14, fontWeight: "700", color: colors.ink, minWidth: 72, textAlign: "center" },
+  hojeButton: { color: colors.accent, fontWeight: "700", fontSize: 12, marginLeft: spacing.sm },
+  chipsScroll: { flexGrow: 0, paddingLeft: spacing.xl },
+  chips: { gap: spacing.sm, paddingRight: spacing.xl, paddingBottom: spacing.sm },
+  chip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  chipAtivo: { backgroundColor: colors.accent, borderColor: colors.accent },
+  chipLabel: { fontSize: 12, fontWeight: "700", color: colors.inkMuted },
+  chipLabelAtivo: { color: colors.accentInk },
   list: { padding: spacing.xl },
   empty: { color: colors.inkMuted, fontSize: 13, textAlign: "center", marginTop: spacing.xxl },
   time: { fontWeight: "800", color: colors.ink },

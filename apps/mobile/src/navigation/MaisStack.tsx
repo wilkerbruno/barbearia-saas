@@ -5,6 +5,7 @@ import { ServicosScreen } from "../screens/barbearia/ServicosScreen";
 import { PacotesScreen } from "../screens/barbearia/PacotesScreen";
 import { PacotesMensaisScreen } from "../screens/barbearia/PacotesMensaisScreen";
 import { EquipeScreen } from "../screens/barbearia/EquipeScreen";
+import { FuncionarioHorariosScreen } from "../screens/barbearia/FuncionarioHorariosScreen";
 import { AssinaturaScreen } from "../screens/barbearia/AssinaturaScreen";
 import { LocalizacaoScreen } from "../screens/barbearia/LocalizacaoScreen";
 import { LogoScreen } from "../screens/barbearia/LogoScreen";
@@ -17,6 +18,9 @@ export type MaisStackParamList = {
   Pacotes: undefined;
   PacotesMensais: undefined;
   Equipe: undefined;
+  // Edição pelo dono da barbearia dos horários/folgas de um funcionário
+  // específico da equipe (ver FuncionarioHorariosScreen).
+  FuncionarioHorarios: { funcionarioId: string; nome: string };
   Assinatura: undefined;
   Localizacao: undefined;
   Logo: undefined;
@@ -37,6 +41,11 @@ export function MaisStackNavigator() {
         options={{ headerShown: true, title: "Pacotes mensais" }}
       />
       <Stack.Screen name="Equipe" component={EquipeScreen} options={{ headerShown: true, title: "Equipe" }} />
+      <Stack.Screen
+        name="FuncionarioHorarios"
+        component={FuncionarioHorariosScreen}
+        options={{ headerShown: true, title: "Horários" }}
+      />
       <Stack.Screen name="Assinatura" component={AssinaturaScreen} options={{ headerShown: true, title: "Assinatura" }} />
       <Stack.Screen name="Localizacao" component={LocalizacaoScreen} options={{ headerShown: true, title: "Localização" }} />
       <Stack.Screen name="Logo" component={LogoScreen} options={{ headerShown: true, title: "Logo da barbearia" }} />

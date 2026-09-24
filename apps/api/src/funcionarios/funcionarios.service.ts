@@ -86,14 +86,69 @@ export class FuncionariosService {
 
   async listarMeusHorarios(usuarioId: string) {
     const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
-    return this.prisma.horarioTrabalho.findMany({ where: { funcionarioId: funcionario.id }, orderBy: { diaSemana: "asc" } });
+    return this.listarHorariosPorFuncionarioId(funcionario.id);
   }
 
   // Substitui a semana inteira de uma vez (mais simples do que um CRUD dia a
   // dia — a tela do app manda os 7 dias juntos, só com os que ele trabalha).
   async definirMeusHorarios(usuarioId: string, dto: DefinirHorariosDto) {
     const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+    return this.definirHorariosPorFuncionarioId(funcionario.id, dto);
+  }
 
+  // ---------- Horário de trabalho (o dono da barbearia edita o de qualquer funcionário) ----------
+
+  async listarHorariosDoFuncionario(funcionarioId: string, barbeariaId: string) {
+    await this.garantirDaBarbearia(funcionarioId, barbeariaId);
+    return this.listarHorariosPorFuncionarioId(funcionarioId);
+  }
+
+  async definirHorariosDoFuncionario(funcionarioId: string, barbeariaId: string, dto: DefinirHorariosDto) {
+    await this.garantirDaBarbearia(funcionarioId, barbeariaId);
+    return this.definirHorariosPorFuncionarioId(funcionarioId, dto);
+  }
+
+  // ---------- Folgas (o próprio funcionário edita as suas) ----------
+
+  async listarMinhasFolgas(usuarioId: string) {
+    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+    return this.listarFolgasPorFuncionarioId(funcionario.id);
+  }
+
+  async criarMinhaFolga(usuarioId: string, dto: CreateFolgaDto) {
+    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+    return this.criarFolgaPorFuncionarioId(funcionario.id, dto);
+  }
+
+  async removerMinhaFolga(usuarioId: string, folgaId: string) {
+    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+    return this.removerFolgaPorFuncionarioId(funcionario.id, folgaId);
+  }
+
+  // ---------- Folgas (o dono da barbearia edita as de qualquer funcionário) ----------
+
+  async listarFolgasDoFuncionario(funcionarioId: string, barbeariaId: string) {
+    await this.garantirDaBarbearia(funcionarioId, barbeariaId);
+    return this.listarFolgasPorFuncionarioId(funcionarioId);
+  }
+
+  async criarFolgaDoFuncionario(funcionarioId: string, barbeariaId: string, dto: CreateFolgaDto) {
+    await this.garantirDaBarbearia(funcionarioId, barbeariaId);
+    return this.criarFolgaPorFuncionarioId(funcionarioId, dto);
+  }
+
+  async removerFolgaDoFuncionario(funcionarioId: string, barbeariaId: string, folgaId: string) {
+    await this.garantirDaBarbearia(funcionarioId, barbeariaId);
+    return this.removerFolgaPorFuncionarioId(funcionarioId, folgaId);
+  }
+
+  // ---------- implementação comum (horários/folgas), por Funcionario.id ----------
+
+  private async listarHorariosPorFuncionarioId(funcionarioId: string) {
+    return this.prisma.horarioTrabalho.findMany({ where: { funcionarioId }, orderBy: { diaSemana: "asc" } });
+  }
+
+  private async definirHorariosPorFuncionarioId(funcionarioId: string, dto: DefinirHorariosDto) {
     for (const dia of dto.dias) {
       if (dia.horaFim <= dia.horaInicio) {
         throw new BadRequestException(`O horário final precisa ser depois do inicial (dia ${dia.diaSemana}).`);
@@ -105,11 +160,11 @@ export class FuncionariosService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.horarioTrabalho.deleteMany({ where: { funcionarioId: funcionario.id } });
+      await tx.horarioTrabalho.deleteMany({ where: { funcionarioId } });
       if (dto.dias.length > 0) {
         await tx.horarioTrabalho.createMany({
           data: dto.dias.map((dia) => ({
-            funcionarioId: funcionario.id,
+            funcionarioId,
             diaSemana: dia.diaSemana,
             horaInicio: dia.horaInicio,
             horaFim: dia.horaFim,
@@ -120,34 +175,29 @@ export class FuncionariosService {
       }
     });
 
-    return this.listarMeusHorarios(usuarioId);
+    return this.listarHorariosPorFuncionarioId(funcionarioId);
   }
 
-  // ---------- Folgas (o próprio funcionário edita as suas) ----------
-
-  async listarMinhasFolgas(usuarioId: string) {
-    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+  private async listarFolgasPorFuncionarioId(funcionarioId: string) {
     return this.prisma.folga.findMany({
-      where: { funcionarioId: funcionario.id, fim: { gte: new Date() } },
+      where: { funcionarioId, fim: { gte: new Date() } },
       orderBy: { inicio: "asc" },
     });
   }
 
-  async criarMinhaFolga(usuarioId: string, dto: CreateFolgaDto) {
-    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+  private async criarFolgaPorFuncionarioId(funcionarioId: string, dto: CreateFolgaDto) {
     const inicio = new Date(dto.inicio);
     const fim = new Date(dto.fim);
     if (fim <= inicio) throw new BadRequestException("O fim da folga precisa ser depois do início.");
 
     return this.prisma.folga.create({
-      data: { funcionarioId: funcionario.id, inicio, fim, motivo: dto.motivo },
+      data: { funcionarioId, inicio, fim, motivo: dto.motivo },
     });
   }
 
-  async removerMinhaFolga(usuarioId: string, folgaId: string) {
-    const funcionario = await this.buscarFuncionarioPorUsuario(usuarioId);
+  private async removerFolgaPorFuncionarioId(funcionarioId: string, folgaId: string) {
     const folga = await this.prisma.folga.findUnique({ where: { id: folgaId } });
-    if (!folga || folga.funcionarioId !== funcionario.id) throw new NotFoundException("Folga não encontrada.");
+    if (!folga || folga.funcionarioId !== funcionarioId) throw new NotFoundException("Folga não encontrada.");
     await this.prisma.folga.delete({ where: { id: folgaId } });
     return { ok: true };
   }
