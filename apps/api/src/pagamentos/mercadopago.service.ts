@@ -534,7 +534,16 @@ export class MercadoPagoService {
               // código externo do item (não temos um id de produto separado,
               // já que cada Order cobre exatamente 1 "produto": o
               // agendamento em si).
-              external_code: params.externalReference,
+              //
+              // HISTÓRICO (pagamento com cartão 100% recusado em produção,
+              // set/2026): o Mercado Pago rejeitava a Order com HTTP 400
+              // "'$.items[0].external_code' - length must be <= 30, but got
+              // 48" — o external_reference completo (formato
+              // "agendamento_<uuid>") tem 48 caracteres, acima do limite de
+              // 30 desse campo específico. Trunca aqui; não afeta o
+              // external_reference de verdade da Order (esse não tem limite
+              // de 30 e continua completo logo acima).
+              external_code: params.externalReference.slice(0, 30),
               description: params.descricao.slice(0, 256),
               // "services" é o category_id documentado pelo próprio Mercado
               // Pago pra negócio de serviço (usado nas páginas de "dados de
@@ -547,21 +556,29 @@ export class MercadoPagoService {
               ...(params.dataAgendamento ? { event_date: params.dataAgendamento.toISOString() } : {}),
             },
           ],
-          // additional_info.payer (ver comentário nos parâmetros
-          // payerCadastradoEm/payerPrimeiraCompra/payerUltimaCompraEm acima)
-          // — dado real do comprador, nunca fictício (exigência explícita do
-          // suporte: "pedimos apenas que não sejam enviados dados
-          // fictícios"). authentication_type "MOBILE" é fixo porque esse
-          // fluxo só existe dentro do app nativo (CartaoScreen) — não tem
-          // como o pagamento chegar aqui vindo de outro lugar.
-          additional_info: {
-            payer: {
-              registration_date: params.payerCadastradoEm.toISOString(),
-              authentication_type: "MOBILE",
-              is_first_purchase_online: params.payerPrimeiraCompra,
-              ...(params.payerUltimaCompraEm ? { last_purchase: params.payerUltimaCompraEm.toISOString() } : {}),
-            },
-          },
+          // additional_info.payer — DESATIVADO (pagamento com cartão 100%
+          // recusado em produção, set/2026, logo depois de ligar isso): o
+          // Mercado Pago devolveu HTTP 400 "'$.additional_info' -
+          // additionalProperties 'payer' not allowed". Ou seja: o formato
+          // aninhado additional_info.payer.{...} que o suporte deles pediu
+          // (ticket WCS-50070) e que a doc da API clássica de Payments usa
+          // NÃO é aceito pela Orders API (POST /v1/orders, usada aqui) — o
+          // schema de `additional_info` dela não tem essa chave "payer". Os
+          // parâmetros abaixo continuam sendo calculados/recebidos (dado real
+          // do comprador, nada fictício, exatamente como pedido) e é só
+          // religar este bloco assim que o suporte confirmar o formato
+          // correto pra Orders API — mas até lá isso tem que ficar fora do
+          // body, porque um objeto rejeitado quebra a Order inteira (não é
+          // ignorado silenciosamente).
+          //
+          // additional_info: {
+          //   payer: {
+          //     registration_date: params.payerCadastradoEm.toISOString(),
+          //     authentication_type: "MOBILE",
+          //     is_first_purchase_online: params.payerPrimeiraCompra,
+          //     ...(params.payerUltimaCompraEm ? { last_purchase: params.payerUltimaCompraEm.toISOString() } : {}),
+          //   },
+          // },
           payer: {
             email: params.payerEmail,
             first_name: primeiroNome || params.payerNome,
