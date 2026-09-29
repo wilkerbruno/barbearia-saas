@@ -12,7 +12,7 @@ import {
   calcularPrecoAnualCentavos,
   centavosParaReais,
 } from "@barbearia-saas/shared";
-import { api } from "../../api/client";
+import { api, mensagemErroApi } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -141,7 +141,7 @@ export function AssinaturaScreen({ navigation }: Props) {
       });
       navigation.navigate("AssinaturaPagamentoPendente", { pagamento: data });
     } catch (e: any) {
-      Alert.alert("Não foi possível iniciar o pagamento", e?.response?.data?.message ?? "Tente de novo.");
+      Alert.alert("Não foi possível iniciar o pagamento", mensagemErroApi(e));
     } finally {
       setPagando(false);
     }

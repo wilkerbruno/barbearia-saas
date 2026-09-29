@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { CartaoSalvoAssinatura, PagamentoAssinatura, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
-import { api } from "../../api/client";
+import { api, mensagemErroApi } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { colors, radius, spacing } from "../../theme/tokens";
@@ -36,6 +36,11 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
 
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [carregandoChave, setCarregandoChave] = useState(true);
+  // Antes essa falha era só engolida (setPublicKey(null) e pronto) — o botão
+  // ficava desabilitado pra sempre sem nenhuma explicação, dando a impressão
+  // de "não acontece nada" ao selecionar cartão. Agora guardamos o motivo pra
+  // mostrar na tela e oferecer "Tentar de novo".
+  const [erroChave, setErroChave] = useState<string | null>(null);
 
   const [numero, setNumero] = useState("");
   const [validade, setValidade] = useState("");
@@ -60,13 +65,27 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
   const numeroLimpo = numero.replace(/\D/g, "");
   const bandeira = useMemo(() => identificarBandeiraLocal(numeroLimpo), [numeroLimpo]);
 
-  useEffect(() => {
+  const carregarChave = useCallback(() => {
+    setCarregandoChave(true);
+    setErroChave(null);
     api
       .get<{ publicKey: string | null }>("/assinaturas/minha/mercadopago-public-key")
-      .then(({ data }) => setPublicKey(data.publicKey))
-      .catch(() => setPublicKey(null))
+      .then(({ data }) => {
+        setPublicKey(data.publicKey);
+        if (!data.publicKey) {
+          setErroChave("Pagamento com cartão está temporariamente indisponível. Tente pagar com Pix.");
+        }
+      })
+      .catch((e) => {
+        setPublicKey(null);
+        setErroChave(mensagemErroApi(e, "Não foi possível carregar o pagamento com cartão."));
+      })
       .finally(() => setCarregandoChave(false));
   }, []);
+
+  useEffect(() => {
+    carregarChave();
+  }, [carregarChave]);
 
   useEffect(() => {
     api
@@ -204,7 +223,7 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
 
       navigation.replace("AssinaturaPagamentoPendente", { pagamento: data });
     } catch (e: any) {
-      Alert.alert("Pagamento não aprovado", e?.response?.data?.message ?? "Não foi possível concluir o pagamento. Tente outro cartão.");
+      Alert.alert("Pagamento não aprovado", mensagemErroApi(e, "Não foi possível concluir o pagamento. Tente outro cartão."));
     } finally {
       setEnviando(false);
     }
@@ -401,12 +420,19 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
             Pagamento processado com segurança pelo Mercado Pago — seus dados de cartão não passam pelos nossos servidores.
           </Text>
 
-          <Button
-            label={carregandoChave ? "Carregando…" : "Pagar agora"}
-            onPress={confirmar}
-            loading={enviando}
-            disabled={carregandoChave || !publicKey}
-          />
+          {erroChave && !carregandoChave ? (
+            <Card style={{ borderColor: colors.danger, gap: spacing.sm }}>
+              <Text style={styles.erroTexto}>{erroChave}</Text>
+              <Button label="Tentar de novo" onPress={carregarChave} variant="secondary" />
+            </Card>
+          ) : (
+            <Button
+              label={carregandoChave ? "Carregando…" : "Pagar agora"}
+              onPress={confirmar}
+              loading={enviando}
+              disabled={carregandoChave || !publicKey}
+            />
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -421,6 +447,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: colors.inkMuted },
   valor: { fontSize: 28, fontWeight: "800", color: colors.ink },
   hint: { fontSize: 11, color: colors.inkMuted, lineHeight: 16 },
+  erroTexto: { fontSize: 13, color: colors.ink, lineHeight: 18 },
   campoLabel: { fontSize: 13, color: colors.ink },
   input: {
     borderWidth: 1,

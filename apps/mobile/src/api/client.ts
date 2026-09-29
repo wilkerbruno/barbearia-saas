@@ -32,3 +32,25 @@ api.interceptors.response.use(
     return Promise.reject(error);
   },
 );
+
+// Extrai uma mensagem de erro útil de qualquer falha do axios, pra mostrar em
+// Alert.alert — em vez de um fallback genérico tipo "Tente de novo." que não
+// diz NADA quando o problema não é o que a tela esperava (ex: rota nova que
+// ainda não subiu, timeout do proxy, sem internet). Cobre os 3 casos:
+// 1) o servidor respondeu com um erro (JSON com `message`, ou texto puro tipo
+//    "Cannot POST /x" quando a rota não existe) — mostra isso;
+// 2) a requisição saiu mas não voltou resposta nenhuma (sem internet, timeout,
+//    conexão recusada/resetada) — `error.request` existe, `error.response` não;
+// 3) nem chegou a sair (erro de configuração do próprio axios) — `error.message`.
+export function mensagemErroApi(error: any, fallback = "Tente novamente em instantes."): string {
+  if (error?.response) {
+    const dados = error.response.data;
+    const mensagem = typeof dados === "string" ? dados : dados?.message;
+    const texto = Array.isArray(mensagem) ? mensagem.join(" ") : mensagem;
+    return texto || `O servidor respondeu com erro ${error.response.status}.`;
+  }
+  if (error?.request) {
+    return "Sem resposta do servidor — confira sua internet e tente de novo em instantes.";
+  }
+  return error?.message || fallback;
+}
