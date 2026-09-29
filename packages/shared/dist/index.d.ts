@@ -32,7 +32,7 @@ export interface BarbeariaProxima extends Barbearia {
     distanciaKm: number;
     jaAgendou: boolean;
 }
-export type BarbeariaPublica = Pick<Barbearia, "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes" | "mercadoPagoPublicKey">;
+export type BarbeariaPublica = Pick<Barbearia, "id" | "nome" | "endereco" | "telefone" | "latitude" | "longitude" | "logoUrl" | "notaMedia" | "totalAvaliacoes" | "mercadoPagoPublicKey">;
 export interface Servico {
     id: string;
     barbeariaId: string;
@@ -157,6 +157,13 @@ export interface Agendamento {
         id: string;
         nome: string;
         telefone?: string | null;
+    } | null;
+    barbearia?: {
+        id: string;
+        nome: string;
+        endereco?: string | null;
+        latitude?: number | null;
+        longitude?: number | null;
     } | null;
 }
 export interface AgendamentoLoteCriado {
@@ -310,6 +317,17 @@ export interface Fatura {
     metodoPagamento?: string | null;
 }
 export declare function centavosParaReais(centavos: number): string;
+export interface CartaoSalvo {
+    id: string;
+    bandeira: string;
+    ultimosDigitos: string;
+    nomeTitular: string;
+    banco: string | null;
+    bin: string;
+    mercadoPagoCustomerId: string;
+    mercadoPagoCardId: string;
+    criadoEm: string;
+}
 export interface BandeiraCartao {
     paymentMethodId: string;
     nome: string;

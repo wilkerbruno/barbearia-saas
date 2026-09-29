@@ -13,6 +13,8 @@ import {
 } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
+import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
+import { estaForaDaCarencia } from "../assinaturas/assinatura-status.util";
 import { CreateAgendamentoDto } from "./dto/create-agendamento.dto";
 import { CreateAgendamentoLoteDto } from "./dto/create-agendamento-lote.dto";
 import { CreateAgendamentoManualDto } from "./dto/create-agendamento-manual.dto";
@@ -54,7 +56,27 @@ export class AgendamentosService {
     private prisma: PrismaService,
     private config: ConfigService,
     private mercadoPago: MercadoPagoService,
+    private configuracoes: ConfiguracoesService,
   ) {}
+
+  // Cliente não consegue criar um agendamento novo numa barbearia cuja
+  // assinatura do SaaS já passou da carência (mesmo critério que a esconde da
+  // busca — ver BarbeariasService.listarProximas). A equipe dessa barbearia
+  // já está bloqueada bem antes disso (na hora, sem carência — ver
+  // AssinaturaGuard), então essa checagem aqui é só a metade "cliente" da
+  // regra. Sem assinatura cadastrada não bloqueia (não é essa checagem que
+  // decide esse caso).
+  private async garantirBarbeariaDisponivelParaAgendamento(barbeariaId: string) {
+    const assinatura = await this.prisma.assinatura.findUnique({
+      where: { barbeariaId },
+      select: { status: true, bloqueadaEm: true, trialTerminaEm: true },
+    });
+    if (!assinatura) return;
+    const { horasCarenciaAposVencimento } = await this.configuracoes.obter();
+    if (estaForaDaCarencia(assinatura, horasCarenciaAposVencimento)) {
+      throw new BadRequestException("Esta barbearia está temporariamente indisponível para novos agendamentos.");
+    }
+  }
 
   // Mantido por compatibilidade (agendamento de um serviço/pacote só) — por
   // baixo é a mesma coisa que criarLote com um item, mesmo fluxo de pagamento.
@@ -82,6 +104,7 @@ export class AgendamentosService {
     if (resolvidos.some((r) => r.barbeariaId !== barbeariaId)) {
       throw new BadRequestException("Todos os serviços do agendamento precisam ser da mesma barbearia.");
     }
+    await this.garantirBarbeariaDisponivelParaAgendamento(barbeariaId);
 
     const duracaoTotalMinutos = resolvidos.reduce((total, r) => total + r.duracaoMinutos, 0);
     const inicio = new Date(dto.inicio);
@@ -652,7 +675,15 @@ export class AgendamentosService {
   listarMeusComoCliente(clienteId: string) {
     return this.prisma.agendamento.findMany({
       where: { clienteId },
-      include: { servico: true, pacote: true, funcionario: { include: { usuario: true } } },
+      include: {
+        servico: true,
+        pacote: true,
+        funcionario: { include: { usuario: true } },
+        // O cliente pode ter agendamentos em várias barbearias diferentes —
+        // sem isso, "Meus agendamentos" não tinha como mostrar em qual
+        // barbearia foi cada um nem oferecer o botão "Como chegar".
+        barbearia: { select: { id: true, nome: true, endereco: true, latitude: true, longitude: true } },
+      },
       orderBy: { inicio: "desc" },
     });
   }

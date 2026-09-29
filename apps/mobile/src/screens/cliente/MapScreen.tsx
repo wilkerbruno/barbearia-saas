@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
-import { Linking, Platform, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { BarbeariaProxima } from "@barbearia-saas/shared";
 import { colors } from "../../theme/tokens";
+import { abrirNoMapa } from "../../utils/maps";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Map">;
@@ -12,25 +13,6 @@ type Props = NativeStackScreenProps<HomeStackParamList, "Map">;
 // Mensagens que o mapa (JS rodando dentro da WebView, ver montarHtml) manda
 // de volta pro React Native quando o cliente toca num pin.
 type MensagemDoMapa = { tipo: "detalhe"; id: string; nome: string } | { tipo: "rota"; id: string };
-
-// Abre o app de navegação do celular na localização da barbearia. No Android,
-// o esquema "geo:" deixa o próprio sistema abrir o seletor entre todos os
-// apps de mapa instalados (Google Maps, Waze etc.) quando há mais de um — é
-// o que o cliente pediu ("escolher abrir no Google Maps, Waze ou qualquer
-// outro"). No iOS não existe um seletor do sistema; abre no Mapas da Apple
-// (ou no app padrão de navegação, se o cliente tiver configurado um a partir
-// do iOS 17.4).
-function abrirNoMapa(barbearia: Pick<BarbeariaProxima, "nome" | "latitude" | "longitude">) {
-  if (barbearia.latitude == null || barbearia.longitude == null) return;
-  const label = encodeURIComponent(barbearia.nome);
-  const url =
-    Platform.OS === "ios"
-      ? `maps:0,0?q=${label}@${barbearia.latitude},${barbearia.longitude}`
-      : `geo:${barbearia.latitude},${barbearia.longitude}?q=${barbearia.latitude},${barbearia.longitude}(${label})`;
-  Linking.openURL(url).catch(() => {
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${barbearia.latitude},${barbearia.longitude}`);
-  });
-}
 
 // Mapa com OpenStreetMap (via Leaflet, carregado numa WebView) — não depende
 // de conta nem chave de API do Google, ao contrário do react-native-maps no

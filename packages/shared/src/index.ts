@@ -67,7 +67,16 @@ export interface BarbeariaProxima extends Barbearia {
 // que não tem permissão pra ler a barbearia inteira via GET /barbearias/:id).
 export type BarbeariaPublica = Pick<
   Barbearia,
-  "id" | "nome" | "endereco" | "telefone" | "logoUrl" | "notaMedia" | "totalAvaliacoes" | "mercadoPagoPublicKey"
+  | "id"
+  | "nome"
+  | "endereco"
+  | "telefone"
+  | "latitude"
+  | "longitude"
+  | "logoUrl"
+  | "notaMedia"
+  | "totalAvaliacoes"
+  | "mercadoPagoPublicKey"
 >;
 
 // ============================= SERVIÇOS E PACOTES =============================
@@ -234,6 +243,10 @@ export interface Agendamento {
   pacote?: Pick<Pacote, "id" | "nome" | "precoCentavos"> | null;
   funcionario?: { id: string; cargo: string; usuario: { id: string; nome: string } };
   cliente?: { id: string; nome: string; telefone?: string | null } | null;
+  // Só vem populado em "meus agendamentos" (o cliente pode agendar em várias
+  // barbearias, diferente da agenda do funcionário/dono, que já sabe qual é
+  // a própria barbearia) — usado pra mostrar o nome e o botão "Como chegar".
+  barbearia?: { id: string; nome: string; endereco?: string | null; latitude?: number | null; longitude?: number | null } | null;
 }
 
 // Retorno de POST /agendamentos/lote (e POST /agendamentos, que por baixo faz
@@ -496,6 +509,29 @@ export function centavosParaReais(centavos: number): string {
 // MercadoPagoService.identificarBandeiraCartao) quanto pro app mostrar a
 // bandeira ao cliente assim que ele digita o número, sem precisar de log
 // nenhum (ver CartaoScreen).
+// Um cartão que o cliente salvou pra reusar em pagamentos futuros numa
+// barbearia (ver GET/POST/DELETE /cartoes na API e CartaoScreen no mobile).
+// `ultimosDigitos` traz os 4 últimos dígitos que o Mercado Pago devolve — a
+// tela mostra só os 3 últimos. `mercadoPagoCustomerId`/`mercadoPagoCardId`
+// não são segredo (são só referências do lado do Mercado Pago), e o app
+// precisa dos dois pra gerar um token de cobrança novo a cada pagamento
+// (POST https://api.mercadopago.com/v1/card_tokens com card_id+customer_id).
+export interface CartaoSalvo {
+  id: string;
+  bandeira: string; // payment_method.id do Mercado Pago, ex: "visa", "master"
+  ultimosDigitos: string;
+  nomeTitular: string;
+  banco: string | null;
+  // BIN (6 primeiros dígitos) guardado no momento de salvar — reenviado como
+  // `cartaoBin` quando esse cartão salvo é usado num pagamento (ver
+  // CartaoScreen), pra manter o mesmo contrato que o pagamento com cartão
+  // novo já usa (create-agendamento-lote.dto.ts).
+  bin: string;
+  mercadoPagoCustomerId: string;
+  mercadoPagoCardId: string;
+  criadoEm: string;
+}
+
 export interface BandeiraCartao {
   paymentMethodId: string; // vocabulário do Mercado Pago: "visa", "master", "elo", "amex", "hipercard", "diners"
   nome: string; // nome de exibição

@@ -3,6 +3,7 @@ import { JwtService } from "@nestjs/jwt";
 import * as bcrypt from "bcryptjs";
 import { Papel, StatusAssinatura } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
+import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterClienteDto } from "./dto/register-cliente.dto";
 import { RegisterBarbeariaDto } from "./dto/register-barbearia.dto";
@@ -21,6 +22,7 @@ export class AuthService {
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
+    private configuracoes: ConfiguracoesService,
   ) {}
 
   private async assinarToken(usuario: { id: string; papel: Papel; barbeariaId: string | null }) {
@@ -82,6 +84,7 @@ export class AuthService {
     }
 
     const senhaHash = await bcrypt.hash(dto.senha, 10);
+    const { diasTesteGratis } = await this.configuracoes.obter();
 
     const resultado = await this.prisma.$transaction(async (tx) => {
       const barbearia = await tx.barbearia.create({
@@ -98,15 +101,15 @@ export class AuthService {
         },
       });
 
-      const trialAte = new Date();
-      trialAte.setDate(trialAte.getDate() + 14);
+      const trialTerminaEm = new Date();
+      trialTerminaEm.setDate(trialTerminaEm.getDate() + diasTesteGratis);
 
       await tx.assinatura.create({
         data: {
           barbeariaId: barbearia.id,
           planoId: plano.id,
           status: StatusAssinatura.TRIAL,
-          proximaCobrancaEm: trialAte,
+          trialTerminaEm,
         },
       });
 

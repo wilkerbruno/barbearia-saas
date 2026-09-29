@@ -10,6 +10,7 @@ import { Card } from "../../components/Card";
 import { PriceTag } from "../../components/PriceTag";
 import { StarRating } from "../../components/StarRating";
 import { colors, radius, spacing } from "../../theme/tokens";
+import { abrirNoMapa } from "../../utils/maps";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "BarbeariaDetail">;
@@ -147,7 +148,17 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
         ListHeaderComponent={
           <View style={{ gap: spacing.xl }}>
             <View style={{ gap: spacing.xs }}>
-              {barbearia.endereco && <Text style={styles.endereco}>{barbearia.endereco}</Text>}
+              {barbearia.endereco && (
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }}>
+                  <Text style={[styles.endereco, { flex: 1 }]}>{barbearia.endereco}</Text>
+                  {barbearia.latitude != null && barbearia.longitude != null && (
+                    <Pressable style={styles.comoChegar} onPress={() => abrirNoMapa(barbearia)}>
+                      <Ionicons name="navigate" size={14} color={colors.accent} />
+                      <Text style={styles.comoChegarTexto}>Como chegar</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
               <StarRating value={barbearia.notaMedia} totalAvaliacoes={barbearia.totalAvaliacoes} size={14} />
             </View>
 
@@ -287,6 +298,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: colors.background, alignItems: "center", justifyContent: "center" },
   list: { padding: spacing.xl },
   endereco: { fontSize: 13, color: colors.inkMuted },
+  comoChegar: { flexDirection: "row", alignItems: "center", gap: 4 },
+  comoChegarTexto: { fontSize: 12, fontWeight: "700", color: colors.accent },
   sectionTitle: { fontSize: 14, fontWeight: "800", color: colors.ink },
   mensagem: { color: colors.inkMuted, fontSize: 13, textAlign: "center", marginTop: spacing.md },
   itemName: { fontSize: 14, fontWeight: "700", color: colors.ink },

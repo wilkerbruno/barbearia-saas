@@ -33,6 +33,8 @@ interface BarbeariaDetalhe {
   assinatura: {
     status: string;
     proximaCobrancaEm: string | null;
+    trialTerminaEm: string | null;
+    bloqueadaEm: string | null;
     plano: Plano;
     faturas: FaturaResumo[];
   } | null;
@@ -137,6 +139,17 @@ export default function BarbeariaDetalhePage() {
               {barbearia.assinatura.proximaCobrancaEm && (
                 <div style={{ fontSize: 12, color: "#837A73", marginTop: 2 }}>
                   Próxima cobrança: {new Date(barbearia.assinatura.proximaCobrancaEm).toLocaleDateString("pt-BR")}
+                </div>
+              )}
+              {barbearia.assinatura.status === "TRIAL" && barbearia.assinatura.trialTerminaEm && (
+                <div style={{ fontSize: 12, color: "#837A73", marginTop: 2 }}>
+                  Teste grátis termina em: {new Date(barbearia.assinatura.trialTerminaEm).toLocaleDateString("pt-BR")}
+                </div>
+              )}
+              {barbearia.assinatura.bloqueadaEm && (
+                <div style={{ fontSize: 12, color: "#C1442E", marginTop: 6, fontWeight: 600 }}>
+                  Equipe bloqueada desde {new Date(barbearia.assinatura.bloqueadaEm).toLocaleString("pt-BR")} — cliente
+                  final some da busca após o período de carência configurado.
                 </div>
               )}
 

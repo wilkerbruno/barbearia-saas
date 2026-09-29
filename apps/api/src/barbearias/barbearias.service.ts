@@ -3,6 +3,8 @@ import sharp from "sharp";
 import { StatusAgendamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
+import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
+import { estaForaDaCarencia } from "../assinaturas/assinatura-status.util";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
 import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
 
@@ -34,6 +36,7 @@ export class BarbeariasService {
   constructor(
     private prisma: PrismaService,
     private mercadoPago: MercadoPagoService,
+    private configuracoes: ConfiguracoesService,
   ) {}
 
   // O Mercado Pago nem sempre devolve a public_key da conta conectada no
@@ -127,14 +130,14 @@ export class BarbeariasService {
       throw new BadRequestException("Informe latitude e longitude válidas.");
     }
 
-    const [candidatas, agendamentosDoCliente] = await Promise.all([
+    const [candidatas, agendamentosDoCliente, { horasCarenciaAposVencimento }] = await Promise.all([
       this.prisma.barbearia.findMany({
         where: {
           latitude: { not: null },
           longitude: { not: null },
           ...(nome ? { nome: { contains: nome } } : {}),
         },
-        select: SELECT_PUBLICO,
+        select: { ...SELECT_PUBLICO, assinatura: { select: { status: true, bloqueadaEm: true, trialTerminaEm: true } } },
       }),
       clienteId
         ? this.prisma.agendamento.findMany({
@@ -143,16 +146,25 @@ export class BarbeariasService {
             distinct: ["barbeariaId"],
           })
         : Promise.resolve([]),
+      this.configuracoes.obter(),
     ]);
 
     const idsJaAgendados = new Set(agendamentosDoCliente.map((a) => a.barbeariaId));
 
     return candidatas
-      .map((barbearia) => ({
-        ...this.comChavePublicaResolvida(barbearia),
-        distanciaKm: distanciaHaversineKm(latitude, longitude, barbearia.latitude!, barbearia.longitude!),
-        jaAgendou: idsJaAgendados.has(barbearia.id),
-      }))
+      // Assinatura vencida há mais de `horasCarenciaAposVencimento`: some da
+      // busca do cliente (a equipe já foi bloqueada bem antes disso — ver
+      // AssinaturaGuard). Sem assinatura cadastrada (não deveria acontecer no
+      // fluxo normal) não é filtrada, pra não esconder por engano.
+      .filter((barbearia) => !barbearia.assinatura || !estaForaDaCarencia(barbearia.assinatura, horasCarenciaAposVencimento))
+      .map((candidata) => {
+        const { assinatura, ...barbearia } = candidata;
+        return {
+          ...this.comChavePublicaResolvida(barbearia),
+          distanciaKm: distanciaHaversineKm(latitude, longitude, barbearia.latitude!, barbearia.longitude!),
+          jaAgendou: idsJaAgendados.has(barbearia.id),
+        };
+      })
       .filter((barbearia) => barbearia.distanciaKm <= raioKm)
       .sort((a, b) => {
         if (a.jaAgendou !== b.jaAgendou) return a.jaAgendou ? -1 : 1;

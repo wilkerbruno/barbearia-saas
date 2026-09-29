@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { AgendamentoLoteCriado, BarbeariaPublica, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
+import { Ionicons } from "@expo/vector-icons";
+import { AgendamentoLoteCriado, BarbeariaPublica, CartaoSalvo, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -11,6 +12,10 @@ import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Cartao">;
+
+// Valor especial de `cartaoSelecionadoId` que significa "digitar um cartão
+// novo" em vez de usar um dos salvos (ver seção "Cartão" no JSX abaixo).
+const NOVO_CARTAO = "novo" as const;
 
 // Página mínima carregada numa WebView OCULTA (nunca aparece na tela) só pra
 // rodar o script antifraude do próprio Mercado Pago (security.js) — ele
@@ -53,6 +58,14 @@ const HTML_DEVICE_ID = `
 // (ver AgendamentosService.criarLote/MercadoPagoService.criarPagamentoCartao).
 // Isso é o que permite o cliente nunca ser levado a um navegador/checkout
 // externo — só esse próprio formulário.
+//
+// Também deixa o cliente escolher um CARTÃO SALVO (ver seção "Cartão"
+// abaixo) em vez de digitar tudo de novo — ver CartoesService/CartaoSalvo na
+// API. Pagar com um cartão salvo usa um token NOVO gerado a partir do
+// card_id (POST /v1/card_tokens com card_id+customer_id+security_code, ver
+// pagarComCartaoSalvo), então o restante do fluxo de cobrança
+// (AgendamentosService.criarLote) nem percebe a diferença — sempre recebe um
+// `cartaoToken` de uso único, exatamente como no cartão novo.
 export function CartaoScreen({ route, navigation }: Props) {
   const { barbeariaId, inicio, itens, valorCentavos } = route.params;
 
@@ -64,7 +77,18 @@ export function CartaoScreen({ route, navigation }: Props) {
   const [cvv, setCvv] = useState("");
   const [nomeTitular, setNomeTitular] = useState("");
   const [cpf, setCpf] = useState("");
+  const [salvarNovoCartao, setSalvarNovoCartao] = useState(false);
   const [enviando, setEnviando] = useState(false);
+
+  // Cartões salvos dessa barbearia (ver CartoesService.listar) — carregada em
+  // paralelo com a chave pública, sem bloquear a tela: enquanto não chega,
+  // o cliente já pode ir preenchendo um cartão novo normalmente.
+  const [cartoesSalvos, setCartoesSalvos] = useState<CartaoSalvo[]>([]);
+  const [cartaoSelecionadoId, setCartaoSelecionadoId] = useState<string>(NOVO_CARTAO);
+  const [cvvCartaoSalvo, setCvvCartaoSalvo] = useState("");
+  const [removendoId, setRemovendoId] = useState<string | null>(null);
+
+  const cartaoSelecionado = cartoesSalvos.find((c) => c.id === cartaoSelecionadoId) ?? null;
 
   // Id do aparelho coletado pela WebView oculta (ver HTML_DEVICE_ID acima).
   // Usa ref (não state) porque só é lido dentro de confirmar(), nunca
@@ -104,7 +128,27 @@ export function CartaoScreen({ route, navigation }: Props) {
       .finally(() => setCarregandoChave(false));
   }, [barbeariaId]);
 
+  // Busca os cartões salvos SÓ dessa barbearia (ver comentário em
+  // ClienteMercadoPagoCustomer no schema — cada barbearia tem sua própria
+  // conta Mercado Pago, então os cartões salvos não são compartilhados entre
+  // barbearias). Falha em silêncio: sem cartão salvo pra mostrar, a tela
+  // segue funcionando normalmente com o formulário de cartão novo.
+  useEffect(() => {
+    api
+      .get<CartaoSalvo[]>("/cartoes", { params: { barbeariaId } })
+      .then(({ data }) => {
+        setCartoesSalvos(data);
+        if (data.length > 0) setCartaoSelecionadoId(data[0].id);
+      })
+      .catch(() => {});
+  }, [barbeariaId]);
+
   function validarCampos(): string | null {
+    if (cartaoSelecionado) {
+      if (cvvCartaoSalvo.length < 3 || cvvCartaoSalvo.length > 4) return "Código de segurança (CVV) inválido.";
+      if (cpf.replace(/\D/g, "").length !== 11) return "CPF inválido.";
+      return null;
+    }
     const numeroLimpo = numero.replace(/\s/g, "");
     if (numeroLimpo.length < 13 || numeroLimpo.length > 19) return "Número do cartão inválido.";
     const [mes, ano] = validade.split("/").map((p) => p.trim());
@@ -141,6 +185,52 @@ export function CartaoScreen({ route, navigation }: Props) {
     });
   }
 
+  // Tokeniza direto com o Mercado Pago (chave pública) — usado tanto pro
+  // cartão novo (com os dados completos) quanto pro cartão salvo (com
+  // card_id+customer_id no lugar do número). Devolve só o token de uso único;
+  // o número do cartão em si nunca passa pelo nosso servidor.
+  async function tokenizar(corpo: Record<string, unknown>): Promise<string> {
+    const resposta = await fetch(`https://api.mercadopago.com/v1/card_tokens?public_key=${publicKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
+    });
+    const corpoResposta: any = await resposta.json().catch(() => null);
+    if (!resposta.ok || !corpoResposta?.id) {
+      throw new Error(corpoResposta?.message ?? corpoResposta?.cause?.[0]?.description ?? "Confira os dados digitados e tente novamente.");
+    }
+    return corpoResposta.id as string;
+  }
+
+  // Salva o cartão recém-digitado pra próxima vez (ver checkbox "Salvar este
+  // cartão" no JSX) — SEMPRE com um token NOVO, diferente do usado pra cobrar
+  // o agendamento (um token do Mercado Pago só serve pra uma operação: ou
+  // cobrar, ou anexar a um customer, nunca as duas). Roda depois do
+  // agendamento já confirmado e nunca derruba o pagamento se falhar — só
+  // avisa discretamente, porque o que importa mesmo pro cliente já aconteceu.
+  async function salvarCartaoParaProximaVez() {
+    try {
+      const numeroLimpo = numero.replace(/\s/g, "");
+      const [mes, anoCurto] = validade.split("/").map((p) => p.trim());
+      const anoCompleto = 2000 + Number(anoCurto);
+      const tokenParaSalvar = await tokenizar({
+        card_number: numeroLimpo,
+        expiration_month: Number(mes),
+        expiration_year: anoCompleto,
+        security_code: cvv,
+        cardholder: {
+          name: nomeTitular.trim(),
+          identification: { type: "CPF", number: cpf.replace(/\D/g, "") },
+        },
+      });
+      await api.post("/cartoes", { barbeariaId, cartaoToken: tokenParaSalvar, bin: numeroLimpo.slice(0, 6) });
+    } catch (e) {
+      // Não bloqueia nem avisa com um Alert (que exigiria toque pra
+      // continuar) — o pagamento já foi aprovado, isso é só um extra.
+      console.warn("Não foi possível salvar o cartão para a próxima vez:", e);
+    }
+  }
+
   async function confirmar() {
     if (!publicKey) {
       Alert.alert(
@@ -161,45 +251,63 @@ export function CartaoScreen({ route, navigation }: Props) {
       // garante que o pagamento só segue depois que a coleta do Device ID
       // já terminou (com ou sem sucesso), nunca no meio dela.
       await aguardarDeviceId();
-      const numeroLimpo = numero.replace(/\s/g, "");
-      const [mes, anoCurto] = validade.split("/").map((p) => p.trim());
-      const anoCompleto = 2000 + Number(anoCurto);
 
-      // Tokeniza direto com o Mercado Pago (chave pública) — o número do
-      // cartão sai do aparelho só nessa chamada, direto pro Mercado Pago;
-      // nosso servidor nunca vê esses dados, só o token abaixo.
-      const respostaToken = await fetch(`https://api.mercadopago.com/v1/card_tokens?public_key=${publicKey}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          card_number: numeroLimpo,
-          expiration_month: Number(mes),
-          expiration_year: anoCompleto,
-          security_code: cvv,
-          cardholder: {
-            name: nomeTitular.trim(),
-            identification: { type: "CPF", number: cpf.replace(/\D/g, "") },
-          },
-        }),
-      });
-      const corpoToken: any = await respostaToken.json().catch(() => null);
-      if (!respostaToken.ok || !corpoToken?.id) {
-        Alert.alert(
-          "Não foi possível validar o cartão",
-          corpoToken?.message ?? corpoToken?.cause?.[0]?.description ?? "Confira os dados digitados e tente novamente.",
-        );
-        return;
+      let cartaoToken: string;
+      let cartaoBin: string;
+      const cpfLimpo = cpf.replace(/\D/g, "");
+
+      if (cartaoSelecionado) {
+        // Cartão salvo: token novo a partir do card_id, sempre pedindo o CVV
+        // de novo (o Mercado Pago não guarda o código de segurança).
+        try {
+          cartaoToken = await tokenizar({
+            card_id: cartaoSelecionado.mercadoPagoCardId,
+            customer_id: cartaoSelecionado.mercadoPagoCustomerId,
+            security_code: cvvCartaoSalvo,
+          });
+        } catch (e: any) {
+          Alert.alert("Não foi possível validar o cartão", e?.message ?? "Confira o código de segurança e tente novamente.");
+          return;
+        }
+        cartaoBin = cartaoSelecionado.bin;
+      } else {
+        const numeroLimpo = numero.replace(/\s/g, "");
+        const [mes, anoCurto] = validade.split("/").map((p) => p.trim());
+        const anoCompleto = 2000 + Number(anoCurto);
+        try {
+          cartaoToken = await tokenizar({
+            card_number: numeroLimpo,
+            expiration_month: Number(mes),
+            expiration_year: anoCompleto,
+            security_code: cvv,
+            cardholder: {
+              name: nomeTitular.trim(),
+              identification: { type: "CPF", number: cpfLimpo },
+            },
+          });
+        } catch (e: any) {
+          Alert.alert("Não foi possível validar o cartão", e?.message ?? "Confira os dados digitados e tente novamente.");
+          return;
+        }
+        cartaoBin = numeroLimpo.slice(0, 6);
       }
 
       const { data } = await api.post<AgendamentoLoteCriado>("/agendamentos/lote", {
         inicio,
         itens,
         metodoPagamento: "CARTAO",
-        cartaoToken: corpoToken.id,
-        cartaoBin: numeroLimpo.slice(0, 6),
-        cartaoCpf: cpf.replace(/\D/g, ""),
+        cartaoToken,
+        cartaoBin,
+        cartaoCpf: cpfLimpo,
         cartaoDeviceId: deviceIdRef.current ?? undefined,
       });
+
+      // Salva o cartão novo (se marcado) só DEPOIS do agendamento confirmado
+      // — nunca antes, pra um problema ao salvar não atrapalhar o pagamento
+      // que já funcionava.
+      if (!cartaoSelecionado && salvarNovoCartao) {
+        await salvarCartaoParaProximaVez();
+      }
 
       if (data.pagamento) {
         navigation.replace("Pagamento", { pagamento: data.pagamento, aviso: data.aviso });
@@ -215,6 +323,37 @@ export function CartaoScreen({ route, navigation }: Props) {
     } finally {
       setEnviando(false);
     }
+  }
+
+  function confirmarRemocao(cartao: CartaoSalvo) {
+    Alert.alert(
+      "Remover cartão",
+      `Remover o cartão ${nomeBandeiraExibicao(cartao.bandeira)} final ${cartao.ultimosDigitos.slice(-3)}?`,
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Remover",
+          style: "destructive",
+          onPress: async () => {
+            setRemovendoId(cartao.id);
+            try {
+              await api.delete(`/cartoes/${cartao.id}`);
+              setCartoesSalvos((atual) => {
+                const restante = atual.filter((c) => c.id !== cartao.id);
+                if (cartaoSelecionadoId === cartao.id) {
+                  setCartaoSelecionadoId(restante.length > 0 ? restante[0].id : NOVO_CARTAO);
+                }
+                return restante;
+              });
+            } catch {
+              Alert.alert("Não foi possível remover", "Tente novamente em instantes.");
+            } finally {
+              setRemovendoId(null);
+            }
+          },
+        },
+      ],
+    );
   }
 
   return (
@@ -236,79 +375,179 @@ export function CartaoScreen({ route, navigation }: Props) {
           javaScriptEnabled
         />
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
-        <Card style={{ alignItems: "center", gap: spacing.xs }}>
-          <Text style={styles.label}>Valor a pagar</Text>
-          <Text style={styles.valor}>{centavosParaReais(valorCentavos)}</Text>
-        </Card>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 24}
+      >
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          <Card style={{ alignItems: "center", gap: spacing.xs }}>
+            <Text style={styles.label}>Valor a pagar</Text>
+            <Text style={styles.valor}>{centavosParaReais(valorCentavos)}</Text>
+          </Card>
 
-        <Text style={styles.sectionTitle}>Dados do cartão</Text>
-        <Card style={{ gap: spacing.sm }}>
-          <TextInput
-            value={numero}
-            onChangeText={(t) => setNumero(formatarNumeroCartao(t))}
-            placeholder="Número do cartão"
-            placeholderTextColor={colors.inkMuted}
-            keyboardType="number-pad"
-            maxLength={23}
-            style={styles.input}
-          />
-          {numeroLimpo.length >= 6 && (
-            <View style={[styles.badgeBandeira, { backgroundColor: bandeira ? corBandeira(bandeira.paymentMethodId) : colors.inkMuted }]}>
-              <Text style={styles.badgeBandeiraTexto}>{bandeira ? bandeira.nome : "Bandeira não reconhecida"}</Text>
-            </View>
+          {cartoesSalvos.length > 0 && (
+            <>
+              <Text style={styles.sectionTitle}>Cartão</Text>
+              <View style={{ gap: spacing.sm }}>
+                {cartoesSalvos.map((cartao) => {
+                  const selecionado = cartao.id === cartaoSelecionadoId;
+                  return (
+                    <Pressable key={cartao.id} onPress={() => setCartaoSelecionadoId(cartao.id)}>
+                      <Card
+                        style={[
+                          styles.linhaCartaoSalvo,
+                          selecionado && { borderColor: colors.accent, borderWidth: 2 },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.badgeBandeira,
+                            { backgroundColor: corBandeira(cartao.bandeira), marginTop: 0 },
+                          ]}
+                        >
+                          <Text style={styles.badgeBandeiraTexto}>{nomeBandeiraExibicao(cartao.bandeira)}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.linhaCartaoTitulo}>•••• {cartao.ultimosDigitos.slice(-3)}</Text>
+                          <Text style={styles.linhaCartaoSubtitulo}>
+                            {cartao.nomeTitular}
+                            {cartao.banco ? ` · ${cartao.banco}` : ""}
+                          </Text>
+                        </View>
+                        {selecionado && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
+                        <Pressable
+                          hitSlop={10}
+                          onPress={() => confirmarRemocao(cartao)}
+                          disabled={removendoId === cartao.id}
+                        >
+                          <Ionicons name="trash-outline" size={20} color={colors.inkMuted} />
+                        </Pressable>
+                      </Card>
+                    </Pressable>
+                  );
+                })}
+                <Pressable onPress={() => setCartaoSelecionadoId(NOVO_CARTAO)}>
+                  <Card
+                    style={[
+                      styles.linhaCartaoSalvo,
+                      cartaoSelecionadoId === NOVO_CARTAO && { borderColor: colors.accent, borderWidth: 2 },
+                    ]}
+                  >
+                    <Ionicons name="add-circle-outline" size={22} color={colors.ink} />
+                    <Text style={styles.linhaCartaoTitulo}>Adicionar novo cartão</Text>
+                  </Card>
+                </Pressable>
+              </View>
+            </>
           )}
-          <View style={{ flexDirection: "row", gap: spacing.sm }}>
-            <TextInput
-              value={validade}
-              onChangeText={(t) => setValidade(formatarValidade(t))}
-              placeholder="MM/AA"
-              placeholderTextColor={colors.inkMuted}
-              keyboardType="number-pad"
-              maxLength={5}
-              style={[styles.input, { flex: 1 }]}
-            />
-            <TextInput
-              value={cvv}
-              onChangeText={(t) => setCvv(t.replace(/\D/g, "").slice(0, 4))}
-              placeholder="CVV"
-              placeholderTextColor={colors.inkMuted}
-              keyboardType="number-pad"
-              maxLength={4}
-              secureTextEntry
-              style={[styles.input, { flex: 1 }]}
-            />
-          </View>
-          <TextInput
-            value={nomeTitular}
-            onChangeText={setNomeTitular}
-            placeholder="Nome impresso no cartão"
-            placeholderTextColor={colors.inkMuted}
-            autoCapitalize="characters"
-            style={styles.input}
-          />
-          <TextInput
-            value={cpf}
-            onChangeText={(t) => setCpf(formatarCpf(t))}
-            placeholder="CPF do titular"
-            placeholderTextColor={colors.inkMuted}
-            keyboardType="number-pad"
-            maxLength={14}
-            style={styles.input}
-          />
-        </Card>
 
-        <Text style={styles.hint}>
-          Pagamento processado com segurança pelo Mercado Pago — seus dados de cartão não passam pelos nossos servidores.
-        </Text>
+          {cartaoSelecionado ? (
+            <>
+              <Text style={styles.sectionTitle}>Confirmar pagamento</Text>
+              <Card style={{ gap: spacing.sm }}>
+                <TextInput
+                  value={cvvCartaoSalvo}
+                  onChangeText={(t) => setCvvCartaoSalvo(t.replace(/\D/g, "").slice(0, 4))}
+                  placeholder="CVV do cartão selecionado"
+                  placeholderTextColor={colors.inkMuted}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  secureTextEntry
+                  style={styles.input}
+                />
+                <TextInput
+                  value={cpf}
+                  onChangeText={(t) => setCpf(formatarCpf(t))}
+                  placeholder="CPF do titular"
+                  placeholderTextColor={colors.inkMuted}
+                  keyboardType="number-pad"
+                  maxLength={14}
+                  style={styles.input}
+                />
+              </Card>
+            </>
+          ) : (
+            <>
+              <Text style={styles.sectionTitle}>Dados do cartão</Text>
+              <Card style={{ gap: spacing.sm }}>
+                <TextInput
+                  value={numero}
+                  onChangeText={(t) => setNumero(formatarNumeroCartao(t))}
+                  placeholder="Número do cartão"
+                  placeholderTextColor={colors.inkMuted}
+                  keyboardType="number-pad"
+                  maxLength={23}
+                  style={styles.input}
+                />
+                {numeroLimpo.length >= 6 && (
+                  <View style={[styles.badgeBandeira, { backgroundColor: bandeira ? corBandeira(bandeira.paymentMethodId) : colors.inkMuted }]}>
+                    <Text style={styles.badgeBandeiraTexto}>{bandeira ? bandeira.nome : "Bandeira não reconhecida"}</Text>
+                  </View>
+                )}
+                <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                  <TextInput
+                    value={validade}
+                    onChangeText={(t) => setValidade(formatarValidade(t))}
+                    placeholder="MM/AA"
+                    placeholderTextColor={colors.inkMuted}
+                    keyboardType="number-pad"
+                    maxLength={5}
+                    style={[styles.input, { flex: 1 }]}
+                  />
+                  <TextInput
+                    value={cvv}
+                    onChangeText={(t) => setCvv(t.replace(/\D/g, "").slice(0, 4))}
+                    placeholder="CVV"
+                    placeholderTextColor={colors.inkMuted}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    secureTextEntry
+                    style={[styles.input, { flex: 1 }]}
+                  />
+                </View>
+                <TextInput
+                  value={nomeTitular}
+                  onChangeText={setNomeTitular}
+                  placeholder="Nome impresso no cartão"
+                  placeholderTextColor={colors.inkMuted}
+                  autoCapitalize="characters"
+                  style={styles.input}
+                />
+                <TextInput
+                  value={cpf}
+                  onChangeText={(t) => setCpf(formatarCpf(t))}
+                  placeholder="CPF do titular"
+                  placeholderTextColor={colors.inkMuted}
+                  keyboardType="number-pad"
+                  maxLength={14}
+                  style={styles.input}
+                />
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: spacing.xs }}>
+                  <Text style={styles.campoLabel}>Salvar este cartão para a próxima vez</Text>
+                  <Switch
+                    value={salvarNovoCartao}
+                    onValueChange={setSalvarNovoCartao}
+                    trackColor={{ false: colors.border, true: colors.accentSoft }}
+                    thumbColor={salvarNovoCartao ? colors.accent : colors.inkMuted}
+                  />
+                </View>
+              </Card>
+            </>
+          )}
 
-        <Button
-          label={carregandoChave ? "Carregando…" : "Pagar agora"}
-          onPress={confirmar}
-          loading={enviando}
-          disabled={carregandoChave || !publicKey}
-        />
-      </ScrollView>
+          <Text style={styles.hint}>
+            Pagamento processado com segurança pelo Mercado Pago — seus dados de cartão não passam pelos nossos servidores.
+          </Text>
+
+          <Button
+            label={carregandoChave ? "Carregando…" : "Pagar agora"}
+            onPress={confirmar}
+            loading={enviando}
+            disabled={carregandoChave || !publicKey}
+          />
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -333,6 +572,29 @@ function corBandeira(paymentMethodId: string): string {
       return "#0079BE";
     default:
       return colors.inkMuted;
+  }
+}
+
+// Nome de exibição de um cartão SALVO a partir do payment_method.id que o
+// Mercado Pago devolveu ao salvar (ver CartaoSalvo.bandeira) — o cartão novo
+// já tem esse nome pronto em `identificarBandeiraLocal` (campo `nome`), mas
+// o salvo só guarda o id (ex: "visa"), daí esse mapa separado.
+function nomeBandeiraExibicao(paymentMethodId: string): string {
+  switch (paymentMethodId) {
+    case "visa":
+      return "Visa";
+    case "master":
+      return "Mastercard";
+    case "elo":
+      return "Elo";
+    case "amex":
+      return "Amex";
+    case "hipercard":
+      return "Hipercard";
+    case "diners":
+      return "Diners";
+    default:
+      return paymentMethodId;
   }
 }
 
@@ -363,6 +625,7 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: colors.inkMuted },
   valor: { fontSize: 28, fontWeight: "800", color: colors.ink },
   hint: { fontSize: 11, color: colors.inkMuted, lineHeight: 16 },
+  campoLabel: { fontSize: 13, color: colors.ink },
   input: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -385,4 +648,11 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textTransform: "uppercase",
   },
+  linhaCartaoSalvo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  linhaCartaoTitulo: { fontSize: 14, fontWeight: "700", color: colors.ink },
+  linhaCartaoSubtitulo: { fontSize: 12, color: colors.inkMuted },
 });

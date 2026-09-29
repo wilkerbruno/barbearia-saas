@@ -17,12 +17,17 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Se o token expirar/for inválido, desloga automaticamente.
+// Se o token expirar/for inválido, desloga automaticamente. Se a API recusar
+// por assinatura bloqueada (ver AssinaturaGuard na API), marca isso no
+// authStore — é o que faz o RootNavigator tirar FUNCIONARIO/BARBEARIA_ADMIN
+// das telas normais na hora, sem cada tela precisar tratar esse erro.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error?.response?.status === 401) {
       useAuthStore.getState().logout();
+    } else if (error?.response?.data?.code === "ASSINATURA_BLOQUEADA") {
+      useAuthStore.getState().setAssinaturaBloqueada(true);
     }
     return Promise.reject(error);
   },

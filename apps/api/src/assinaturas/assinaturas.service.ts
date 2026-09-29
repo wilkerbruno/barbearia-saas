@@ -1,8 +1,12 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { StatusAssinatura, StatusFatura } from "@barbearia-saas/shared";
+import { Cron, CronExpression } from "@nestjs/schedule";
+import { Papel, StatusAssinatura, StatusFatura } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
+import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
+import { PushService } from "../push/push.service";
+import { estaForaDaCarencia, diasRestantesVencimento, DIAS_AVISO_VENCIMENTO } from "./assinatura-status.util";
 
 // Casa o status devolvido pelo Mercado Pago (pagamento aprovado/pendente/
 // recusado) com o enum interno de Fatura.
@@ -14,6 +18,13 @@ function mapearStatusFatura(statusPagamento: string | null | undefined): StatusF
   return StatusFatura.ATRASADA; // rejected, cancelled, refunded, charged_back, etc.
 }
 
+// Estado mínimo necessário pra decidir o que fazer com `bloqueadaEm` numa
+// transição de status — ver AssinaturasService.dadosParaStatus.
+interface AssinaturaStatusAtual {
+  status: StatusAssinatura;
+  bloqueadaEm: Date | null;
+}
+
 @Injectable()
 export class AssinaturasService {
   private readonly logger = new Logger(AssinaturasService.name);
@@ -22,15 +33,134 @@ export class AssinaturasService {
     private prisma: PrismaService,
     private config: ConfigService,
     private mercadoPago: MercadoPagoService,
+    private configuracoes: ConfiguracoesService,
+    private push: PushService,
   ) {}
 
+  // Ponto único que decide `bloqueadaEm` em qualquer transição de status —
+  // toda mudança de status da assinatura (checkout confirmado, cancelamento,
+  // ação manual do SAAS_ADMIN, webhook do Mercado Pago, trial vencido) passa
+  // por aqui, nunca seta `status`/`bloqueadaEm` na mão. Regras:
+  // - TRIAL/ATIVA: sempre limpa `bloqueadaEm` (conta em dia).
+  // - INADIMPLENTE/CANCELADA: seta `bloqueadaEm = agora` só na transição de
+  //   "em dia" -> "bloqueada" — se já estava bloqueada, mantém o instante
+  //   original, senão um webhook duplicado (ex: MP reenviando o mesmo evento)
+  //   ficaria empurrando pra sempre o relógio da carência do cliente.
+  // Também zera `avisoVencimentoEnviadoEm` sempre que o novo status é
+  // TRIAL/ATIVA — ciclo novo (renovou ou entrou no ar), então o aviso de "vai
+  // vencer" precisa poder disparar de novo no próximo vencimento. Enquanto
+  // fica bloqueada, deixa como está (undefined = Prisma não mexe no campo).
+  private dadosParaStatus(status: StatusAssinatura, atual: AssinaturaStatusAtual) {
+    const eraBloqueada = atual.status === StatusAssinatura.INADIMPLENTE || atual.status === StatusAssinatura.CANCELADA;
+    const ficaBloqueada = status === StatusAssinatura.INADIMPLENTE || status === StatusAssinatura.CANCELADA;
+    let bloqueadaEm = atual.bloqueadaEm;
+    if (!ficaBloqueada) bloqueadaEm = null;
+    else if (!eraBloqueada) bloqueadaEm = new Date();
+    const avisoVencimentoEnviadoEm = ficaBloqueada ? undefined : null;
+    return { status, bloqueadaEm, avisoVencimentoEnviadoEm };
+  }
+
+  // Checagem "preguiçosa" (sem job agendado): se o trial passou do prazo e a
+  // assinatura ainda não foi paga, vira CANCELADA na hora. Chamado sempre que
+  // alguém olha pra essa assinatura (minhaAssinatura, o AssinaturaGuard, a
+  // listagem pública de barbearias) — assim o status nunca fica "TRIAL"
+  // visivelmente vencido esperando um cron rodar.
+  async expirarTrialSeVencido(barbeariaId: string) {
+    const assinatura = await this.prisma.assinatura.findUnique({ where: { barbeariaId } });
+    if (!assinatura) return null;
+    const venceu = assinatura.status === StatusAssinatura.TRIAL && assinatura.trialTerminaEm && assinatura.trialTerminaEm.getTime() <= Date.now();
+    if (!venceu) return assinatura;
+
+    return this.prisma.assinatura.update({
+      where: { barbeariaId },
+      data: this.dadosParaStatus(StatusAssinatura.CANCELADA, assinatura),
+    });
+  }
+
+  // Usado pelo AssinaturaGuard: equipe (funcionário + admin da barbearia) é
+  // bloqueada IMEDIATAMENTE quando a assinatura não está TRIAL/ATIVA — sem
+  // carência (a carência de horasCarenciaAposVencimento é só pro cliente
+  // final continuar vendo a barbearia por um tempo, ver estaForaDaCarencia).
+  async verificarBloqueioEquipe(barbeariaId: string): Promise<{ bloqueada: boolean; status: StatusAssinatura }> {
+    const assinatura = await this.expirarTrialSeVencido(barbeariaId);
+    if (!assinatura) return { bloqueada: false, status: StatusAssinatura.TRIAL };
+    const bloqueada = assinatura.status === StatusAssinatura.INADIMPLENTE || assinatura.status === StatusAssinatura.CANCELADA;
+    return { bloqueada, status: assinatura.status };
+  }
+
+  // Usado pra decidir se a barbearia deve sumir da busca/agendamento do
+  // cliente final: só depois que passou `horasCarenciaAposVencimento` desde
+  // que `bloqueadaEm` foi setado (ver dadosParaStatus). Uma assinatura
+  // TRIAL/ATIVA (bloqueadaEm null) nunca está fora da carência.
+  async estaForaDaCarencia(barbeariaId: string): Promise<boolean> {
+    const assinatura = await this.expirarTrialSeVencido(barbeariaId);
+    if (!assinatura) return false;
+    const { horasCarenciaAposVencimento } = await this.configuracoes.obter();
+    return estaForaDaCarencia(assinatura, horasCarenciaAposVencimento);
+  }
+
   async minhaAssinatura(barbeariaId: string) {
+    await this.expirarTrialSeVencido(barbeariaId);
     const assinatura = await this.prisma.assinatura.findUnique({
       where: { barbeariaId },
       include: { plano: true, faturas: { orderBy: { vencimentoEm: "desc" }, take: 12 } },
     });
     if (!assinatura) throw new NotFoundException("Barbearia sem assinatura ativa.");
     return assinatura;
+  }
+
+  // Versão enxuta de minhaAssinatura pro pop-up de "assinatura vencendo" —
+  // acessível também pro FUNCIONARIO (que não pode ver faturas/preço do
+  // plano, só se está vencendo e quanto falta).
+  async resumoVencimento(barbeariaId: string) {
+    const assinatura = await this.expirarTrialSeVencido(barbeariaId);
+    if (!assinatura) return { status: null, diasRestantes: null, vencendo: false };
+    const diasRestantes = diasRestantesVencimento(assinatura);
+    const vencendo =
+      (assinatura.status === StatusAssinatura.TRIAL || assinatura.status === StatusAssinatura.ATIVA) &&
+      diasRestantes !== null &&
+      diasRestantes <= DIAS_AVISO_VENCIMENTO;
+    return { status: assinatura.status, diasRestantes, vencendo };
+  }
+
+  // Cron diário: avisa por push a equipe (BARBEARIA_ADMIN + FUNCIONARIO) de
+  // toda barbearia cujo trial/mensalidade vence em até DIAS_AVISO_VENCIMENTO
+  // dias — uma vez por janela de vencimento (avisoVencimentoEnviadoEm marca
+  // que já mandou; dadosParaStatus zera esse campo de novo quando o status
+  // volta a ser TRIAL/ATIVA, liberando um aviso novo no próximo ciclo).
+  @Cron(CronExpression.EVERY_DAY_AT_9AM)
+  async verificarAvisosDeVencimento() {
+    const limite = new Date(Date.now() + DIAS_AVISO_VENCIMENTO * 24 * 60 * 60 * 1000);
+    const candidatas = await this.prisma.assinatura.findMany({
+      where: {
+        avisoVencimentoEnviadoEm: null,
+        OR: [
+          { status: StatusAssinatura.TRIAL, trialTerminaEm: { lte: limite, gt: new Date() } },
+          { status: StatusAssinatura.ATIVA, proximaCobrancaEm: { lte: limite, gt: new Date() } },
+        ],
+      },
+    });
+
+    for (const assinatura of candidatas) {
+      const diasRestantes = diasRestantesVencimento(assinatura);
+      if (diasRestantes === null) continue;
+
+      const usuarios = await this.prisma.usuario.findMany({
+        where: { barbeariaId: assinatura.barbeariaId, papel: { in: [Papel.BARBEARIA_ADMIN, Papel.FUNCIONARIO] } },
+        select: { pushToken: true },
+      });
+      const titulo = "Assinatura vencendo";
+      const corpo =
+        diasRestantes <= 0
+          ? "Sua assinatura vence hoje. Renove para não perder o acesso."
+          : `Sua assinatura vence em ${diasRestantes} dia(s). Renove para não perder o acesso.`;
+      await this.push.enviarParaTokens(usuarios.map((u) => u.pushToken), titulo, corpo, { tipo: "ASSINATURA_VENCENDO" });
+
+      await this.prisma.assinatura.update({
+        where: { id: assinatura.id },
+        data: { avisoVencimentoEnviadoEm: new Date() },
+      });
+    }
   }
 
   // Cria a cobrança recorrente no Mercado Pago pro plano escolhido — o dono
@@ -81,7 +211,7 @@ export class AssinaturasService {
     }
     return this.prisma.assinatura.update({
       where: { barbeariaId },
-      data: { status: StatusAssinatura.CANCELADA },
+      data: this.dadosParaStatus(StatusAssinatura.CANCELADA, assinatura),
     });
   }
 
@@ -89,10 +219,10 @@ export class AssinaturasService {
   // administrativo: cortesia, ajuste manual, downgrade pra um plano grátis
   // etc. O fluxo normal do dono da barbearia é via criarCheckout.
   async mudarPlanoAdmin(barbeariaId: string, planoId: string) {
-    await this.minhaAssinatura(barbeariaId);
+    const assinatura = await this.minhaAssinatura(barbeariaId);
     return this.prisma.assinatura.update({
       where: { barbeariaId },
-      data: { planoId, status: StatusAssinatura.ATIVA },
+      data: { planoId, ...this.dadosParaStatus(StatusAssinatura.ATIVA, assinatura) },
       include: { plano: true },
     });
   }
@@ -100,8 +230,12 @@ export class AssinaturasService {
   // SAAS_ADMIN suspende/reativa manualmente a assinatura de uma barbearia
   // (ex: inadimplência tratada fora do gateway, suporte, etc).
   async definirStatusAdmin(barbeariaId: string, status: StatusAssinatura) {
-    await this.minhaAssinatura(barbeariaId);
-    return this.prisma.assinatura.update({ where: { barbeariaId }, data: { status }, include: { plano: true } });
+    const assinatura = await this.minhaAssinatura(barbeariaId);
+    return this.prisma.assinatura.update({
+      where: { barbeariaId },
+      data: this.dadosParaStatus(status, assinatura),
+      include: { plano: true },
+    });
   }
 
   // Painel SaaS: visão geral de todas as assinaturas + faturamento recorrente.
@@ -161,21 +295,35 @@ export class AssinaturasService {
     const { assinaturaId, planoId } = this.parseExternalReference(preapproval.externalReference);
     if (!assinaturaId) return;
 
-    const dados: { gatewayAssinaturaId: string; status?: StatusAssinatura; planoId?: string; proximaCobrancaEm?: Date } = {
+    const atual = await this.prisma.assinatura.findUnique({ where: { id: assinaturaId } });
+    if (!atual) {
+      this.logger.error(`Assinatura ${assinaturaId} (do external_reference da preapproval) não encontrada.`);
+      return;
+    }
+
+    const dados: {
+      gatewayAssinaturaId: string;
+      status: StatusAssinatura;
+      bloqueadaEm: Date | null;
+      avisoVencimentoEnviadoEm?: Date | null;
+      planoId?: string;
+      proximaCobrancaEm?: Date;
+    } = {
       gatewayAssinaturaId: preapprovalId,
+      ...this.dadosParaStatus(atual.status, atual),
     };
     if (preapproval.status === "authorized") {
-      dados.status = StatusAssinatura.ATIVA;
+      Object.assign(dados, this.dadosParaStatus(StatusAssinatura.ATIVA, atual));
       if (planoId) dados.planoId = planoId;
       if (preapproval.nextPaymentDate) dados.proximaCobrancaEm = new Date(preapproval.nextPaymentDate);
     } else if (preapproval.status === "cancelled") {
-      dados.status = StatusAssinatura.CANCELADA;
+      Object.assign(dados, this.dadosParaStatus(StatusAssinatura.CANCELADA, atual));
     } else if (preapproval.status === "paused") {
-      dados.status = StatusAssinatura.INADIMPLENTE;
+      Object.assign(dados, this.dadosParaStatus(StatusAssinatura.INADIMPLENTE, atual));
     }
 
     await this.prisma.assinatura.update({ where: { id: assinaturaId }, data: dados }).catch((e) => {
-      this.logger.error(`Assinatura ${assinaturaId} (do external_reference da preapproval) não encontrada: ${e}`);
+      this.logger.error(`Falha ao atualizar assinatura ${assinaturaId} a partir do webhook de preapproval: ${e}`);
     });
   }
 
@@ -260,7 +408,10 @@ export class AssinaturasService {
     // em dia — mesmo que o webhook de preapproval (que normalmente já cuida
     // disso) tenha se perdido por algum motivo.
     if (statusFatura === StatusFatura.PAGA && assinatura.status !== StatusAssinatura.ATIVA) {
-      await this.prisma.assinatura.update({ where: { id: assinatura.id }, data: { status: StatusAssinatura.ATIVA } });
+      await this.prisma.assinatura.update({
+        where: { id: assinatura.id },
+        data: this.dadosParaStatus(StatusAssinatura.ATIVA, assinatura),
+      });
     }
   }
 

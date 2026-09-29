@@ -1,14 +1,20 @@
 import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
-import { Papel } from "@barbearia-saas/shared";
+import { Papel, StatusAssinatura } from "@barbearia-saas/shared";
 import { useAuthStore } from "../store/authStore";
+import { api } from "../api/client";
 import { colors } from "../theme/tokens";
 import { AuthNavigator } from "./AuthNavigator";
 import { ClienteTabs } from "./ClienteTabs";
 import { FuncionarioTabs } from "./FuncionarioTabs";
 import { BarbeariaTabs } from "./BarbeariaTabs";
 import { AcessoNaoSuportadoScreen } from "../screens/auth/AcessoNaoSuportadoScreen";
+import { AssinaturaScreen } from "../screens/barbearia/AssinaturaScreen";
+import { FuncionarioAssinaturaBloqueadaScreen } from "../screens/funcionario/AssinaturaBloqueadaScreen";
+import { PopupVencimentoAssinatura } from "../components/PopupVencimentoAssinatura";
+import { registrarPushToken } from "../utils/push";
+import { navigationRef } from "./navigationRef";
 
 // Papéis com uma stack mobile de verdade. O SAAS_ADMIN (administrador da
 // plataforma) usa o painel web separado (apps/admin-web) e não entra aqui —
@@ -17,11 +23,42 @@ import { AcessoNaoSuportadoScreen } from "../screens/auth/AcessoNaoSuportadoScre
 const PAPEIS_COM_STACK_MOBILE = [Papel.CLIENTE, Papel.FUNCIONARIO, Papel.BARBEARIA_ADMIN] as const;
 
 export function RootNavigator() {
-  const { usuario, carregando, restaurarSessao, logout } = useAuthStore();
+  const { usuario, carregando, assinaturaBloqueada, restaurarSessao, logout, setAssinaturaBloqueada } = useAuthStore();
 
   useEffect(() => {
     restaurarSessao();
   }, [restaurarSessao]);
+
+  // O dono (BARBEARIA_ADMIN) tem uma rota isenta do bloqueio (assinaturas/minha
+  // — ver AssinaturaGuard/@PermitirAssinaturaBloqueada na API), então dá pra
+  // checar o status de cara ao entrar, sem esperar alguma outra tela tomar um
+  // 403 primeiro. O FUNCIONARIO não tem essa rota; pra ele, o interceptor do
+  // axios (api/client.ts) é quem detecta o bloqueio, na primeira chamada que
+  // fizer depois de vencer.
+  useEffect(() => {
+    if (usuario?.papel !== Papel.BARBEARIA_ADMIN) return;
+    api
+      .get<{ status: StatusAssinatura }>("/assinaturas/minha")
+      .then((res) => {
+        const emDia = res.data.status === StatusAssinatura.TRIAL || res.data.status === StatusAssinatura.ATIVA;
+        setAssinaturaBloqueada(!emDia);
+      })
+      .catch(() => {});
+  }, [usuario?.papel, usuario?.barbeariaId, setAssinaturaBloqueada]);
+
+  // Registra o token de push pra equipe (dono/funcionário) — hoje só usado
+  // pelo aviso de assinatura vencendo (ver AssinaturasService.
+  // verificarAvisosDeVencimento na API). Roda de novo a cada login/sessão
+  // restaurada; registrarPushToken() já lida sozinho com permissão negada,
+  // simulador, ou EAS ainda não configurado, devolvendo null nesses casos.
+  useEffect(() => {
+    if (usuario?.papel !== Papel.BARBEARIA_ADMIN && usuario?.papel !== Papel.FUNCIONARIO) return;
+    registrarPushToken()
+      .then((token) => {
+        if (token) api.patch("/usuarios/meu-push-token", { pushToken: token }).catch(() => {});
+      })
+      .catch(() => {});
+  }, [usuario?.papel, usuario?.id]);
 
   if (carregando) {
     return (
@@ -36,13 +73,21 @@ export function RootNavigator() {
   // nenhum jeito de voltar pro login a não ser reinstalando o app.
   const papelSemSuporteMobile = usuario && !PAPEIS_COM_STACK_MOBILE.includes(usuario.papel as any);
 
+  // O pop-up de "assinatura vencendo em breve" só faz sentido enquanto a
+  // equipe ainda está com acesso normal (assinaturaBloqueada=false) — uma vez
+  // bloqueada, a tela cheia de bloqueio (acima) já cobre o aviso.
+  const mostrarPopupVencimento =
+    !assinaturaBloqueada && (usuario?.papel === Papel.FUNCIONARIO || usuario?.papel === Papel.BARBEARIA_ADMIN);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       {!usuario && <AuthNavigator />}
       {papelSemSuporteMobile && <AcessoNaoSuportadoScreen onSair={logout} />}
       {usuario?.papel === Papel.CLIENTE && <ClienteTabs />}
-      {usuario?.papel === Papel.FUNCIONARIO && <FuncionarioTabs />}
-      {usuario?.papel === Papel.BARBEARIA_ADMIN && <BarbeariaTabs />}
+      {usuario?.papel === Papel.FUNCIONARIO &&
+        (assinaturaBloqueada ? <FuncionarioAssinaturaBloqueadaScreen onSair={logout} /> : <FuncionarioTabs />)}
+      {usuario?.papel === Papel.BARBEARIA_ADMIN && (assinaturaBloqueada ? <AssinaturaScreen /> : <BarbeariaTabs />)}
+      {mostrarPopupVencimento && <PopupVencimentoAssinatura podeRenovar={usuario?.papel === Papel.BARBEARIA_ADMIN} />}
     </NavigationContainer>
   );
 }

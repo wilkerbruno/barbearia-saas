@@ -136,7 +136,16 @@ export class MercadoPagoService {
     });
     const corpo: any = await resposta.json().catch(() => null);
     if (!resposta.ok) {
-      this.logger.error(`Mercado Pago ${init?.method ?? "GET"} ${path} -> ${resposta.status}: ${JSON.stringify(corpo)}`);
+      // X-Request-Id (ticket WCS-50070, set/2026): o suporte do Mercado Pago
+      // pede esse header pra rastrear a chamada do lado deles — sem logar
+      // aqui, uma recusa só é reproduzível enquanto o log do corpo ainda
+      // ajuda, e algumas respostas (ex: "422 genérico" sem detalhe no corpo)
+      // só dão pra investigar de verdade com esse id. `Headers.get` já é
+      // case-insensitive, não precisa tentar variações de capitalização.
+      const requestId = resposta.headers.get("x-request-id");
+      this.logger.error(
+        `Mercado Pago ${init?.method ?? "GET"} ${path} -> ${resposta.status} (X-Request-Id: ${requestId ?? "ausente"}): ${JSON.stringify(corpo)}`,
+      );
       // O Mercado Pago manda o motivo certo em `cause[0].description` (ex:
       // "cpf invalid", "Invalid parameter identification.number") ou, às
       // vezes, só em `message` — sobe esse texto pra quem chamou em vez de um
@@ -819,6 +828,88 @@ export class MercadoPagoService {
       },
       accessTokenOverride,
     );
+  }
+
+  // ============================= CARTÕES SALVOS (cliente) =============================
+  //
+  // Guarda um cartão do CLIENTE pra ele reusar em compras futuras nessa
+  // barbearia — igual ao pagamento avulso (criarPagamentoCartao acima), o
+  // número completo do cartão nunca passa por aqui: o app tokeniza direto
+  // com o Mercado Pago (POST /v1/card_tokens) e só manda esse token pra cá.
+  //
+  // Cada barbearia tem sua própria conta MP (marketplace), então um
+  // "customer" do Mercado Pago só existe dentro de UMA conta — por isso
+  // criamos/reusamos um customer por (cliente, barbearia), não um customer
+  // global do cliente (ver ClienteMercadoPagoCustomer no schema).
+
+  // Devolve o customer_id do Mercado Pago pra esse cliente NESSA barbearia,
+  // criando um novo (e persistindo) se ainda não existir. Chamado só na hora
+  // de salvar o primeiro cartão do cliente numa barbearia.
+  async obterOuCriarCustomer(
+    params: { clienteId: string; barbeariaId: string; email: string; nome: string },
+    accessTokenOverride: string,
+  ): Promise<string> {
+    const existente = await this.prisma.clienteMercadoPagoCustomer.findUnique({
+      where: { clienteId_barbeariaId: { clienteId: params.clienteId, barbeariaId: params.barbeariaId } },
+    });
+    if (existente) return existente.mercadoPagoCustomerId;
+
+    let customerId: string;
+    try {
+      const corpo: any = await this.chamar(
+        "/v1/customers",
+        { method: "POST", body: JSON.stringify({ email: params.email, first_name: params.nome }) },
+        accessTokenOverride,
+      );
+      customerId = corpo.id;
+    } catch (e) {
+      // O Mercado Pago recusa criar um customer novo com um email que já
+      // existe NESSA conta (ex: o registro local de
+      // ClienteMercadoPagoCustomer foi perdido por algum motivo, mas o
+      // customer lá continua existindo) — nesse caso busca o customer
+      // existente por email em vez de propagar o erro.
+      const corpo: any = await this.chamar(
+        `/v1/customers/search?email=${encodeURIComponent(params.email)}`,
+        undefined,
+        accessTokenOverride,
+      );
+      const encontrado = corpo?.results?.[0]?.id;
+      if (!encontrado) throw e;
+      customerId = encontrado;
+    }
+
+    await this.prisma.clienteMercadoPagoCustomer.create({
+      data: { clienteId: params.clienteId, barbeariaId: params.barbeariaId, mercadoPagoCustomerId: customerId },
+    });
+    return customerId;
+  }
+
+  // Anexa um cartão TOKENIZADO (ver comentário da seção acima) ao customer,
+  // devolvendo os dados não sensíveis que o Mercado Pago manda de volta —
+  // quem chama (CartoesService) é quem persiste isso em CartaoSalvo.
+  async salvarCartaoNoCustomer(
+    customerId: string,
+    cardToken: string,
+    accessTokenOverride: string,
+  ): Promise<{ mercadoPagoCardId: string; bandeira: string; ultimosDigitos: string; nomeTitular: string; banco: string | null }> {
+    const corpo: any = await this.chamar(
+      `/v1/customers/${customerId}/cards`,
+      { method: "POST", body: JSON.stringify({ token: cardToken }) },
+      accessTokenOverride,
+    );
+    return {
+      mercadoPagoCardId: corpo.id,
+      bandeira: corpo.payment_method?.id ?? "desconhecida",
+      ultimosDigitos: corpo.last_four_digits ?? "????",
+      nomeTitular: corpo.cardholder?.name ?? "",
+      banco: corpo.issuer?.name ?? null,
+    };
+  }
+
+  // Remove o cartão do cliente lá no Mercado Pago — quem chama também apaga a
+  // linha local de CartaoSalvo depois que isso não der erro.
+  async removerCartaoDoCustomer(customerId: string, cardId: string, accessTokenOverride: string): Promise<void> {
+    await this.chamar(`/v1/customers/${customerId}/cards/${cardId}`, { method: "DELETE" }, accessTokenOverride);
   }
 
   // Confere a assinatura HMAC da notificação (header x-signature), usando o

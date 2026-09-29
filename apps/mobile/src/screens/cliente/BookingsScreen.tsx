@@ -1,12 +1,14 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 import { Agendamento, centavosParaReais, StatusAgendamento } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Card } from "../../components/Card";
 import { StatusBadge } from "../../components/StatusBadge";
 import { colors, spacing } from "../../theme/tokens";
+import { abrirNoMapa } from "../../utils/maps";
 
 // Vários serviços marcados juntos (mesmo grupoId — ver BookingScreen) aparecem
 // como um card só, com cada serviço listado e o valor total somado.
@@ -71,12 +73,25 @@ export function BookingsScreen() {
         renderItem={({ item: visita }) => {
           const total = visita.reduce((soma, item) => soma + item.precoCentavos, 0);
           const status = visita[0].status;
+          const barbearia = visita[0].barbearia;
+          const temLocalizacao = barbearia?.latitude != null && barbearia?.longitude != null;
           return (
             <Card style={{ marginBottom: spacing.sm, gap: spacing.sm }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
                 <Text style={styles.itemTitle}>{new Date(visita[0].inicio).toLocaleString("pt-BR")}</Text>
                 <StatusBadge status={status} />
               </View>
+              {barbearia && (
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }}>
+                  <Text style={styles.barbeariaNome}>{barbearia.nome}</Text>
+                  {temLocalizacao && (
+                    <Pressable style={styles.comoChegar} onPress={() => abrirNoMapa(barbearia)}>
+                      <Ionicons name="navigate" size={13} color={colors.accent} />
+                      <Text style={styles.comoChegarTexto}>Como chegar</Text>
+                    </Pressable>
+                  )}
+                </View>
+              )}
               <View style={{ gap: 2 }}>
                 {visita.map((item) => (
                   <Text key={item.id} style={styles.itemServico}>
@@ -108,6 +123,9 @@ const styles = StyleSheet.create({
   list: { padding: spacing.xl },
   empty: { color: colors.inkMuted, fontSize: 13, textAlign: "center", marginTop: spacing.xxl },
   itemTitle: { fontWeight: "700", color: colors.ink, textTransform: "capitalize" },
+  barbeariaNome: { fontSize: 12, fontWeight: "700", color: colors.inkMuted, flex: 1 },
+  comoChegar: { flexDirection: "row", alignItems: "center", gap: 4 },
+  comoChegarTexto: { fontSize: 12, fontWeight: "700", color: colors.accent },
   itemServico: { fontSize: 13, color: colors.inkMuted },
   itemTotal: { fontWeight: "800", color: colors.ink, fontSize: 15 },
   cancelar: { color: colors.danger, fontWeight: "700", fontSize: 13 },

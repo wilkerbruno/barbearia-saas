@@ -123,6 +123,8 @@ model Barbearia {
   avaliacoes   Avaliacao[]
   pagamentos   Pagamento[]
   assinaturasPacote AssinaturaPacoteCliente[]
+  cartoesSalvos CartaoSalvo[]
+  clientesMercadoPago ClienteMercadoPagoCustomer[]
 }
 
 // ============================= USUÁRIOS =============================
@@ -138,6 +140,14 @@ model Usuario {
   barbearia    Barbearia? @relation(fields: [barbeariaId], references: [id])
   criadoEm     DateTime  @default(now())
 
+  // Token de push do Expo (celular atual) — sobrescrito a cada novo login/
+  // registro (um usuário só recebe push no último aparelho em que entrou).
+  // Usado hoje só pro aviso de assinatura vencendo (ver
+  // AssinaturasService.verificarAvisosDeVencimento e PushService) — null
+  // enquanto o usuário nunca autorizou notificações ou nunca logou depois
+  // dessa feature existir.
+  pushToken    String?
+
   // Preenchido apenas quando papel = FUNCIONARIO
   funcionario  Funcionario?
 
@@ -152,7 +162,71 @@ model Usuario {
   pagamentos Pagamento[]
   assinaturasPacote AssinaturaPacoteCliente[]
 
+  // Cartões salvos pelo cliente (por barbearia — ver CartaoSalvo) e o
+  // vínculo com o "customer" do Mercado Pago de cada barbearia em que ele
+  // salvou algum cartão (ver ClienteMercadoPagoCustomer).
+  cartoesSalvos CartaoSalvo[]
+  clientesMercadoPago ClienteMercadoPagoCustomer[]
+
   @@index([barbeariaId])
+}
+
+// Vínculo entre um cliente (Usuario papel=CLIENTE) e o "customer" que ele tem
+// na conta Mercado Pago de UMA barbearia específica — necessário porque cada
+// barbearia tem sua própria conta MP conectada (modelo marketplace, ver
+// Barbearia.mercadoPagoAccessToken), então o mesmo cliente tem um customer_id
+// diferente em cada barbearia onde salvou um cartão. Criado sob demanda na
+// primeira vez que o cliente marca "salvar este cartão" (ver
+// CartoesService.obterOuCriarCustomer) — nunca é apagado junto com os
+// cartões, pra não precisar recriar o customer no Mercado Pago toda vez.
+model ClienteMercadoPagoCustomer {
+  id                    String   @id @default(uuid())
+  clienteId             String
+  cliente               Usuario  @relation(fields: [clienteId], references: [id])
+  barbeariaId           String
+  barbearia             Barbearia @relation(fields: [barbeariaId], references: [id])
+  mercadoPagoCustomerId String
+  criadoEm              DateTime @default(now())
+
+  @@unique([clienteId, barbeariaId])
+}
+
+// Um cartão que o cliente escolheu salvar pra usar em pagamentos futuros
+// nessa barbearia (ver CartoesService/CartaoScreen no mobile). Guardamos só
+// dados NÃO sensíveis devolvidos pelo Mercado Pago na hora de salvar — nunca
+// o número completo, nunca o CVV (aliás o CVV é pedido de novo a cada
+// pagamento, mesmo com cartão salvo, e tokenizado direto no app: ver
+// tela de pagamento). `ultimosDigitos` guarda os 4 dígitos finais que o MP
+// devolve; a tela mostra só os 3 últimos, por pedido do dono do produto.
+model CartaoSalvo {
+  id                    String   @id @default(uuid())
+  clienteId             String
+  cliente               Usuario  @relation(fields: [clienteId], references: [id])
+  barbeariaId           String
+  barbearia             Barbearia @relation(fields: [barbeariaId], references: [id])
+
+  // IDs do próprio Mercado Pago — precisos pra gerar um token de cobrança
+  // novo a cada pagamento (POST /v1/card_tokens com card_id+customer_id) e
+  // pra remover o cartão lá quando o cliente exclui (DELETE .../cards/:id).
+  mercadoPagoCustomerId String
+  mercadoPagoCardId     String   @unique
+
+  bandeira       String  // payment_method.id do MP, ex: "visa", "master"
+  ultimosDigitos String  // last_four_digits devolvido pelo MP
+  nomeTitular    String
+  banco          String? // issuer.name do MP — nem sempre disponível
+
+  // 6 primeiros dígitos do cartão (BIN), enviados pelo próprio app no momento
+  // de salvar (o mesmo dado que já ia em `cartaoBin` no pagamento avulso, ver
+  // AgendamentosService) — guardado aqui pra poder identificar a bandeira de
+  // novo (MercadoPagoService.identificarBandeiraCartao) quando o cliente usa
+  // esse cartão salvo num pagamento futuro, sem depender de o Mercado Pago
+  // devolver esse dado de novo na hora de tokenizar via card_id.
+  bin String
+
+  criadoEm DateTime @default(now())
+
+  @@index([clienteId, barbeariaId])
 }
 
 // Dados específicos de quem trabalha na barbearia (papel = FUNCIONARIO).
@@ -457,10 +531,42 @@ model Assinatura {
   status             StatusAssinatura @default(TRIAL)
   inicioEm           DateTime         @default(now())
   proximaCobrancaEm  DateTime?
-  // id da assinatura no gateway de pagamento (Stripe/Asaas/Iugu/etc.) — preencher na integração
+  // Quando o período de teste termina (calculado uma vez no cadastro, a
+  // partir de ConfiguracaoPlataforma.diasTesteGratis vigente naquele
+  // momento — mudar a config depois não afeta trials já em andamento).
+  // Ver AssinaturasService.expirarTrialSeVencido: passado esse instante sem
+  // virar ATIVA, o status vira CANCELADA sozinho (checado sob demanda,
+  // não por um job agendado).
+  trialTerminaEm     DateTime?
+  // Marca o instante em que o status virou INADIMPLENTE/CANCELADA (trial
+  // vencido ou cobrança recorrente falhou/cancelada) — null enquanto
+  // TRIAL/ATIVA. É a partir daqui que se conta a carência
+  // (ConfiguracaoPlataforma.horasCarenciaAposVencimento) antes de a
+  // barbearia sumir pros clientes (equipe é bloqueada na hora, sem
+  // carência — ver AssinaturaGuard).
+  bloqueadaEm        DateTime?
+  // Marca quando o push de "assinatura vencendo em até 3 dias" foi mandado
+  // pra equipe dessa barbearia — evita mandar de novo todo dia enquanto a
+  // mesma janela de vencimento estiver aberta (ver AssinaturasService.
+  // verificarAvisosDeVencimento). Volta pra null sempre que o status vira
+  // TRIAL/ATIVA de novo (ciclo novo — ver dadosParaStatus), então um aviso
+  // novo pode ser mandado no próximo vencimento.
+  avisoVencimentoEnviadoEm DateTime?
+  // id da assinatura (preapproval) no Mercado Pago — ver MercadoPagoService.criarPreapproval
   gatewayAssinaturaId String?
 
   faturas Fatura[]
+}
+
+// Configuração global do SaaS (Divisions Tech), editável pelo SAAS_ADMIN no
+// admin-web — sempre uma linha só (singleton, id fixo "default"). Ver
+// ConfiguracoesService.obter (cria a linha com os defaults abaixo se ainda
+// não existir).
+model ConfiguracaoPlataforma {
+  id                          String   @id @default("default")
+  diasTesteGratis             Int      @default(14)
+  horasCarenciaAposVencimento Int      @default(24)
+  atualizadoEm                DateTime @updatedAt
 }
 
 model Fatura {

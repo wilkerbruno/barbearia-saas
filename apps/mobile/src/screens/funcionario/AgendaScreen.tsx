@@ -1,8 +1,9 @@
 import React, { useCallback, useState } from "react";
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { Ionicons } from "@expo/vector-icons";
 import { Agendamento, StatusAgendamento } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Card } from "../../components/Card";
@@ -13,22 +14,37 @@ import { AgendaStackParamList } from "../../navigation/AgendaStack";
 
 type Props = NativeStackScreenProps<AgendaStackParamList, "Agenda">;
 
-// Agenda do dia do funcionário logado. Ver o protótipo de telas para a versão
-// com seletor de dia (tiras de datas) — aqui já mostra a agenda de hoje em diante.
+function hojeIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function somarDias(dataIso: string, dias: number): string {
+  const data = new Date(`${dataIso}T00:00:00`);
+  data.setDate(data.getDate() + dias);
+  return data.toISOString().slice(0, 10);
+}
+
+function formatarDataExibicao(dataIso: string): string {
+  if (dataIso === hojeIso()) return "Hoje";
+  const [ano, mes, dia] = dataIso.split("-");
+  return `${dia}/${mes}/${ano}`;
+}
+
+// Agenda do funcionário logado — pode navegar entre dias (não só o de hoje).
 export function FuncionarioAgendaScreen({ navigation }: Props) {
   const [agendamentos, setAgendamentos] = useState<Agendamento[]>([]);
+  const [data, setData] = useState(hojeIso());
   const [carregando, setCarregando] = useState(true);
 
   const carregar = useCallback(async () => {
     setCarregando(true);
     try {
-      const hoje = new Date().toISOString().slice(0, 10);
-      const { data } = await api.get<Agendamento[]>("/agendamentos/minha-agenda", { params: { data: hoje } });
-      setAgendamentos(data);
+      const { data: resultado } = await api.get<Agendamento[]>("/agendamentos/minha-agenda", { params: { data } });
+      setAgendamentos(resultado);
     } finally {
       setCarregando(false);
     }
-  }, []);
+  }, [data]);
 
   useFocusEffect(useCallback(() => { carregar(); }, [carregar]));
 
@@ -50,13 +66,29 @@ export function FuncionarioAgendaScreen({ navigation }: Props) {
           + Novo
         </Text>
       </View>
+
+      <View style={styles.navData}>
+        <Pressable onPress={() => setData((d) => somarDias(d, -1))} hitSlop={8}>
+          <Ionicons name="chevron-back" size={22} color={colors.ink} />
+        </Pressable>
+        <Text style={styles.dataLabel}>{formatarDataExibicao(data)}</Text>
+        <Pressable onPress={() => setData((d) => somarDias(d, 1))} hitSlop={8}>
+          <Ionicons name="chevron-forward" size={22} color={colors.ink} />
+        </Pressable>
+        {data !== hojeIso() && (
+          <Text style={styles.hojeButton} onPress={() => setData(hojeIso())}>
+            Hoje
+          </Text>
+        )}
+      </View>
+
       <FlatList
         data={agendamentos}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
         refreshing={carregando}
         onRefresh={carregar}
-        ListEmptyComponent={!carregando ? <Text style={styles.empty}>Nenhum agendamento hoje.</Text> : null}
+        ListEmptyComponent={!carregando ? <Text style={styles.empty}>Nenhum agendamento neste dia.</Text> : null}
         renderItem={({ item }) => (
           <Card style={{ marginBottom: spacing.sm, gap: spacing.xs }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -97,6 +129,15 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 20, fontWeight: "800", color: colors.ink },
   addButton: { color: colors.accent, fontWeight: "700" },
+  navData: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  dataLabel: { fontSize: 14, fontWeight: "700", color: colors.ink, minWidth: 72, textAlign: "center" },
+  hojeButton: { color: colors.accent, fontWeight: "700", fontSize: 12, marginLeft: spacing.sm },
   list: { padding: spacing.xl },
   empty: { color: colors.inkMuted, fontSize: 13, textAlign: "center", marginTop: spacing.xxl },
   time: { fontWeight: "800", color: colors.ink },

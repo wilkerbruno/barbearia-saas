@@ -9,6 +9,7 @@ const ITEMS = [
   { href: "/barbearias", label: "Barbearias" },
   { href: "/planos", label: "Planos e preços" },
   { href: "/faturamento", label: "Faturamento" },
+  { href: "/configuracoes", label: "Configurações" },
 ];
 
 export function Sidebar() {
