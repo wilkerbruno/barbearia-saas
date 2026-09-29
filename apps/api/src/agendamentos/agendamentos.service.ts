@@ -1056,7 +1056,10 @@ function formatarHorario(data: Date): string {
 // código cru (ex: "cc_rejected_insufficient_amount") não diz nada pra quem
 // não é integrador. Lista não exaustiva de propósito: cobre os motivos mais
 // frequentes, com uma mensagem genérica de fallback pros demais.
-function traduzirMotivoRecusaCartao(statusDetail: string | null): string {
+// Exportada (não só usada aqui) — a AssinaturasPagamentoService reusa a mesma
+// tradução pra cobrança da mensalidade/anuidade do SaaS, mesmo mecanismo de
+// cartão (ver comentário acima).
+export function traduzirMotivoRecusaCartao(statusDetail: string | null): string {
   const mensagens: Record<string, string> = {
     cc_rejected_insufficient_amount: "Cartão sem limite suficiente para esse valor.",
     cc_rejected_bad_filled_security_code: "Código de segurança (CVV) incorreto.",

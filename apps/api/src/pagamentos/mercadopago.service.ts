@@ -350,12 +350,18 @@ export class MercadoPagoService {
   // Cria uma cobrança Pix avulsa (não recorrente) — usada pra pagar UM
   // agendamento. Devolve o QR code pronto pra exibir; a confirmação de
   // verdade chega pelo webhook "payment" (ver AgendamentosService).
+  // `accessTokenOverride` opcional (ao contrário do que a assinatura sugeria
+  // antes): omitir usa o token de PLATAFORMA (ver `chamar()`) — necessário
+  // pra cobrar a própria mensalidade do SaaS (AssinaturasPagamentoService),
+  // que não tem um "token da barbearia" (o dinheiro fica com a Divisions
+  // Tech, não com a barbearia). Chamadas existentes (pagamento do cliente
+  // final) continuam passando o token da barbearia normalmente.
   async criarPagamentoPix(params: {
     valorCentavos: number;
     descricao: string;
     externalReference: string;
     payerEmail: string;
-  }, accessTokenOverride: string): Promise<PixCriado> {
+  }, accessTokenOverride?: string): Promise<PixCriado> {
     const corpo: any = await this.chamar(
       "/v1/payments",
       {
@@ -462,7 +468,9 @@ export class MercadoPagoService {
       // (também pedido no mesmo ticket, "quando disponível").
       dataAgendamento?: Date;
     },
-    accessTokenOverride: string,
+    // Opcional pelo mesmo motivo do comentário em criarPagamentoPix acima —
+    // omitir usa o token de plataforma (cobrança da mensalidade do SaaS).
+    accessTokenOverride?: string,
   ): Promise<CartaoPagamentoCriado> {
     // HISTÓRICO DE INVESTIGAÇÃO (cartão recusado com "Invalid
     // payment_method_id", código 3028, mesmo com bandeira certa e habilitada
@@ -884,13 +892,51 @@ export class MercadoPagoService {
     return customerId;
   }
 
+  // Equivalente a obterOuCriarCustomer acima, mas pro OUTRO fluxo de dinheiro
+  // (ver cabeçalho da classe): o customer aqui vive na conta da PLATAFORMA,
+  // um por barbearia (ver BarbeariaMercadoPagoCustomer) — usado só pra ela
+  // salvar um cartão e pagar a própria mensalidade do SaaS. Sem
+  // accessTokenOverride: sempre token de plataforma (nunca faria sentido usar
+  // o token da própria barbearia aqui).
+  async obterOuCriarCustomerBarbearia(params: { barbeariaId: string; email: string; nome: string }): Promise<string> {
+    const existente = await this.prisma.barbeariaMercadoPagoCustomer.findUnique({
+      where: { barbeariaId: params.barbeariaId },
+    });
+    if (existente) return existente.mercadoPagoCustomerId;
+
+    let customerId: string;
+    try {
+      const corpo: any = await this.chamar("/v1/customers", {
+        method: "POST",
+        body: JSON.stringify({ email: params.email, first_name: params.nome }),
+      });
+      customerId = corpo.id;
+    } catch (e) {
+      // Mesmo caso de obterOuCriarCustomer acima: a conta pode já ter um
+      // customer com esse email (registro local perdido) — busca em vez de
+      // propagar o erro.
+      const corpo: any = await this.chamar(`/v1/customers/search?email=${encodeURIComponent(params.email)}`);
+      const encontrado = corpo?.results?.[0]?.id;
+      if (!encontrado) throw e;
+      customerId = encontrado;
+    }
+
+    await this.prisma.barbeariaMercadoPagoCustomer.create({
+      data: { barbeariaId: params.barbeariaId, mercadoPagoCustomerId: customerId },
+    });
+    return customerId;
+  }
+
   // Anexa um cartão TOKENIZADO (ver comentário da seção acima) ao customer,
   // devolvendo os dados não sensíveis que o Mercado Pago manda de volta —
   // quem chama (CartoesService) é quem persiste isso em CartaoSalvo.
   async salvarCartaoNoCustomer(
     customerId: string,
     cardToken: string,
-    accessTokenOverride: string,
+    // Opcional pelo mesmo motivo de criarPagamentoPix/criarPagamentoCartao
+    // acima — omitir usa o token de plataforma (cartão salvo pra pagar a
+    // própria mensalidade do SaaS, ver AssinaturasCartoesService).
+    accessTokenOverride?: string,
   ): Promise<{ mercadoPagoCardId: string; bandeira: string; ultimosDigitos: string; nomeTitular: string; banco: string | null }> {
     const corpo: any = await this.chamar(
       `/v1/customers/${customerId}/cards`,
@@ -908,7 +954,7 @@ export class MercadoPagoService {
 
   // Remove o cartão do cliente lá no Mercado Pago — quem chama também apaga a
   // linha local de CartaoSalvo depois que isso não der erro.
-  async removerCartaoDoCustomer(customerId: string, cardId: string, accessTokenOverride: string): Promise<void> {
+  async removerCartaoDoCustomer(customerId: string, cardId: string, accessTokenOverride?: string): Promise<void> {
     await this.chamar(`/v1/customers/${customerId}/cards/${cardId}`, { method: "DELETE" }, accessTokenOverride);
   }
 

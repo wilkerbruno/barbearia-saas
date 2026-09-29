@@ -1,5 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { PagamentoAssinatura, PeriodicidadeAssinatura } from "@barbearia-saas/shared";
 import { MaisScreen } from "../screens/barbearia/MaisScreen";
 import { ServicosScreen } from "../screens/barbearia/ServicosScreen";
 import { PacotesScreen } from "../screens/barbearia/PacotesScreen";
@@ -7,6 +8,8 @@ import { PacotesMensaisScreen } from "../screens/barbearia/PacotesMensaisScreen"
 import { EquipeScreen } from "../screens/barbearia/EquipeScreen";
 import { FuncionarioHorariosScreen } from "../screens/barbearia/FuncionarioHorariosScreen";
 import { AssinaturaScreen } from "../screens/barbearia/AssinaturaScreen";
+import { AssinaturaPagamentoScreen } from "../screens/barbearia/AssinaturaPagamentoScreen";
+import { AssinaturaPagamentoPendenteScreen } from "../screens/barbearia/AssinaturaPagamentoPendenteScreen";
 import { LocalizacaoScreen } from "../screens/barbearia/LocalizacaoScreen";
 import { LogoScreen } from "../screens/barbearia/LogoScreen";
 import { ConectarMercadoPagoScreen } from "../screens/barbearia/ConectarMercadoPagoScreen";
@@ -22,6 +25,11 @@ export type MaisStackParamList = {
   // específico da equipe (ver FuncionarioHorariosScreen).
   FuncionarioHorarios: { funcionarioId: string; nome: string };
   Assinatura: undefined;
+  // "Cartão" na tela de Assinatura — tokeniza e cobra a mensalidade/anuidade
+  // do SaaS na hora (ver AssinaturaPagamentoScreen), sem sair do app. Pix vai
+  // direto pra AssinaturaPagamentoPendente.
+  AssinaturaPagamento: { planoId: string; nomePlano: string; periodicidade: PeriodicidadeAssinatura; valorCentavos: number };
+  AssinaturaPagamentoPendente: { pagamento: PagamentoAssinatura };
   Localizacao: undefined;
   Logo: undefined;
   MercadoPago: undefined;
@@ -47,6 +55,16 @@ export function MaisStackNavigator() {
         options={{ headerShown: true, title: "Horários" }}
       />
       <Stack.Screen name="Assinatura" component={AssinaturaScreen} options={{ headerShown: true, title: "Assinatura" }} />
+      <Stack.Screen
+        name="AssinaturaPagamento"
+        component={AssinaturaPagamentoScreen}
+        options={{ headerShown: true, title: "Pagamento" }}
+      />
+      <Stack.Screen
+        name="AssinaturaPagamentoPendente"
+        component={AssinaturaPagamentoPendenteScreen}
+        options={{ headerShown: true, title: "Pagamento", gestureEnabled: false }}
+      />
       <Stack.Screen name="Localizacao" component={LocalizacaoScreen} options={{ headerShown: true, title: "Localização" }} />
       <Stack.Screen name="Logo" component={LogoScreen} options={{ headerShown: true, title: "Logo da barbearia" }} />
       <Stack.Screen name="MercadoPago" component={ConectarMercadoPagoScreen} options={{ headerShown: true, title: "Mercado Pago" }} />

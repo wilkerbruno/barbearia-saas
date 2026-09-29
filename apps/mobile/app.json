@@ -7,8 +7,12 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "assetBundlePatterns": ["**/*"],
-    "ios": { "supportsTablet": false },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false
+    },
     "android": {
       "package": "com.divisionstech.barbeariasaas",
       "versionCode": 1,
@@ -21,10 +25,13 @@
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-notifications"],
+    "plugins": [
+      "expo-notifications"
+    ],
     "extra": {
       "eas": {
-        "_comment": "Falta rodar `eas init` (ou `eas build:configure`) pra preencher o projectId de verdade — sem ele, getExpoPushTokenAsync não funciona (ver src/utils/push.ts)."
+        "_comment": "Falta rodar `eas init` (ou `eas build:configure`) pra preencher o projectId de verdade — sem ele, getExpoPushTokenAsync não funciona (ver src/utils/push.ts).",
+        "projectId": "2e92e786-9f04-4438-9391-c4c0f59c49a5"
       }
     }
   }

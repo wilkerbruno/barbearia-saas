@@ -74,6 +74,22 @@ enum StatusFatura {
   ATRASADA
 }
 
+// Periodicidade escolhida pelo dono da barbearia pra pagar a mensalidade do
+// SaaS — ver PagamentoAssinatura/AssinaturasService. ANUAL cobre 12 meses de
+// uma vez só, com o desconto configurado em Plano.descontoAnualTipo/Valor.
+enum PeriodicidadeAssinatura {
+  MENSAL
+  ANUAL
+}
+
+// Como o desconto do plano anual é calculado a partir do preço mensal — ver
+// Plano.descontoAnualTipo/descontoAnualValor e calcularPrecoAnualCentavos
+// (pacote compartilhado).
+enum TipoDesconto {
+  PERCENTUAL // descontoAnualValor = pontos percentuais (0-100)
+  VALOR_FIXO // descontoAnualValor = centavos abatidos do total anual (12x o mensal)
+}
+
 // ============================= TENANT =============================
 
 model Barbearia {
@@ -125,6 +141,11 @@ model Barbearia {
   assinaturasPacote AssinaturaPacoteCliente[]
   cartoesSalvos CartaoSalvo[]
   clientesMercadoPago ClienteMercadoPagoCustomer[]
+  // Cartão salvo pra PAGAR A PRÓPRIA MENSALIDADE do SaaS (dono pagando a
+  // Divisions Tech) — não confundir com cartoesSalvos acima (cliente final
+  // pagando ESSA barbearia). Ver CartaoSalvoAssinatura/BarbeariaMercadoPagoCustomer.
+  cartoesSalvosAssinatura CartaoSalvoAssinatura[]
+  mercadoPagoCustomerAssinatura BarbeariaMercadoPagoCustomer?
 }
 
 // ============================= USUÁRIOS =============================
@@ -227,6 +248,42 @@ model CartaoSalvo {
   criadoEm DateTime @default(now())
 
   @@index([clienteId, barbeariaId])
+}
+
+// Equivalente a ClienteMercadoPagoCustomer, mas pro OUTRO fluxo de dinheiro
+// (ver cabeçalho de MercadoPagoService): o customer aqui vive na conta da
+// PLATAFORMA (Divisions Tech), um por barbearia — usado só pra ela pagar a
+// própria mensalidade do SaaS com um cartão salvo (ver CartaoSalvoAssinatura,
+// AssinaturasCartoesService).
+model BarbeariaMercadoPagoCustomer {
+  id                    String    @id @default(uuid())
+  barbeariaId           String    @unique
+  barbearia             Barbearia @relation(fields: [barbeariaId], references: [id])
+  mercadoPagoCustomerId String
+  criadoEm              DateTime  @default(now())
+}
+
+// Equivalente a CartaoSalvo, mas pro dono da barbearia pagar a PRÓPRIA
+// mensalidade do SaaS (conta da plataforma, não a da barbearia) — ver
+// BarbeariaMercadoPagoCustomer acima e AssinaturasCartoesService/tela de
+// Assinatura no mobile.
+model CartaoSalvoAssinatura {
+  id                    String   @id @default(uuid())
+  barbeariaId           String
+  barbearia             Barbearia @relation(fields: [barbeariaId], references: [id])
+
+  mercadoPagoCustomerId String
+  mercadoPagoCardId     String   @unique
+
+  bandeira       String
+  ultimosDigitos String
+  nomeTitular    String
+  banco          String?
+  bin            String
+
+  criadoEm DateTime @default(now())
+
+  @@index([barbeariaId])
 }
 
 // Dados específicos de quem trabalha na barbearia (papel = FUNCIONARIO).
@@ -519,7 +576,15 @@ model Plano {
   recursos            Json
   ativo               Boolean  @default(true)
 
+  // Desconto do plano ANUAL (12x o mensal) — configurado pelo SAAS_ADMIN no
+  // admin-web (ver PlanosService). Interpretação de descontoAnualValor
+  // depende do tipo: PERCENTUAL = pontos percentuais (0-100), VALOR_FIXO =
+  // centavos abatidos do total. Ver calcularPrecoAnualCentavos (compartilhado).
+  descontoAnualTipo  TipoDesconto @default(PERCENTUAL)
+  descontoAnualValor Int          @default(0)
+
   assinaturas Assinatura[]
+  pagamentosAssinatura PagamentoAssinatura[]
 }
 
 model Assinatura {
@@ -552,10 +617,22 @@ model Assinatura {
   // TRIAL/ATIVA de novo (ciclo novo — ver dadosParaStatus), então um aviso
   // novo pode ser mandado no próximo vencimento.
   avisoVencimentoEnviadoEm DateTime?
-  // id da assinatura (preapproval) no Mercado Pago — ver MercadoPagoService.criarPreapproval
+  // id da assinatura (preapproval) no Mercado Pago — ver MercadoPagoService.criarPreapproval.
+  // Só preenchido em assinaturas ANTIGAS, criadas antes do pagamento nativo
+  // (ver AssinaturasService.criarCheckout, mantido só pra quem já autorizou
+  // uma cobrança recorrente por ali continuar sendo cobrado automaticamente).
+  // Assinaturas pagas pelo fluxo novo (PagamentoAssinatura) nunca preenchem
+  // isso — é o que distingue as duas pra AssinaturasService.expirarTrialSeVencido
+  // saber quais assinaturas ATIVA e vencidas devem virar INADIMPLENTE sozinhas
+  // (sem preapproval, ninguém mais vai avisar isso por webhook).
   gatewayAssinaturaId String?
+  // Periodicidade do ciclo atual (mensal ou anual) — decide de quanto em
+  // quanto tempo proximaCobrancaEm avança quando um PagamentoAssinatura é
+  // aprovado (ver AssinaturasPagamentoService.aplicarPagamentoAprovado).
+  periodicidade PeriodicidadeAssinatura @default(MENSAL)
 
   faturas Fatura[]
+  pagamentos PagamentoAssinatura[]
 }
 
 // Configuração global do SaaS (Divisions Tech), editável pelo SAAS_ADMIN no
@@ -580,6 +657,39 @@ model Fatura {
   // id da cobrança no gateway de pagamento — preencher na integração
   gatewayFaturaId  String?
   criadoEm         DateTime     @default(now())
+
+  @@index([assinaturaId])
+}
+
+// Tentativa de pagamento nativo (Pix ou cartão tokenizado, direto no app —
+// mesmo mecanismo que o cliente final usa pra pagar um agendamento, ver
+// CartaoScreen/AgendamentosService.criarLote) da mensalidade/anuidade do
+// SaaS. Diferente de Fatura (ledger histórico de cobranças já resolvidas,
+// alimentado também pelo webhook de preapproval legado): esta tabela existe
+// pra acompanhar UMA cobrança em andamento (poll de Pix/3DS — ver
+// AssinaturasPagamentoService, mesmo padrão de Pagamento/AgendamentosService)
+// e, quando aprovada, gera a Fatura correspondente e estende
+// Assinatura.proximaCobrancaEm.
+model PagamentoAssinatura {
+  id            String                  @id @default(uuid())
+  assinaturaId  String
+  assinatura    Assinatura              @relation(fields: [assinaturaId], references: [id])
+  planoId       String
+  plano         Plano                   @relation(fields: [planoId], references: [id])
+  periodicidade PeriodicidadeAssinatura
+  metodo        MetodoPagamento
+  status        StatusPagamento         @default(PENDENTE)
+  valorCentavos Int
+
+  gatewayPagamentoId String?
+  pixQrCodeBase64    String? @db.LongText
+  pixCopiaECola      String? @db.Text
+  // URL do desafio 3DS (ver MercadoPagoService.criarPagamentoCartao) — mesmo
+  // mecanismo do pagamento de agendamento.
+  desafio3dsUrl      String? @db.Text
+
+  criadoEm     DateTime @default(now())
+  atualizadoEm DateTime @updatedAt
 
   @@index([assinaturaId])
 }

@@ -1,10 +1,17 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Plano, centavosParaReais } from "@barbearia-saas/shared";
+import { Plano, TipoDesconto, calcularPrecoAnualCentavos, centavosParaReais } from "@barbearia-saas/shared";
 import { api } from "../../lib/api";
 
-const NOVO_PLANO_VAZIO = { nome: "", precoReais: "", limiteFuncionarios: "", recursos: "" };
+const NOVO_PLANO_VAZIO = {
+  nome: "",
+  precoReais: "",
+  limiteFuncionarios: "",
+  recursos: "",
+  descontoAnualTipo: TipoDesconto.PERCENTUAL as TipoDesconto,
+  descontoAnualValor: "",
+};
 
 // Onde o SaaS "faz os valores": cria planos novos, edita o preço de um plano
 // existente e ativa/desativa planos (um plano desativado some da tela de
@@ -13,6 +20,11 @@ export default function PlanosPage() {
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [editandoId, setEditandoId] = useState<string | null>(null);
   const [valor, setValor] = useState("");
+  // Edição do desconto anual — mesmo padrão de editandoId/valor acima, campo
+  // separado porque os dois podem ser editados independentemente.
+  const [editandoDescontoId, setEditandoDescontoId] = useState<string | null>(null);
+  const [descontoTipo, setDescontoTipo] = useState<TipoDesconto>(TipoDesconto.PERCENTUAL);
+  const [descontoValor, setDescontoValor] = useState("");
   const [formAberto, setFormAberto] = useState(false);
   const [novoPlano, setNovoPlano] = useState(NOVO_PLANO_VAZIO);
   const [salvando, setSalvando] = useState(false);
@@ -44,12 +56,36 @@ export default function PlanosPage() {
     carregar();
   }
 
+  function iniciarEdicaoDesconto(plano: Plano) {
+    setEditandoDescontoId(plano.id);
+    setDescontoTipo(plano.descontoAnualTipo);
+    setDescontoValor(
+      plano.descontoAnualTipo === TipoDesconto.PERCENTUAL
+        ? String(plano.descontoAnualValor)
+        : (plano.descontoAnualValor / 100).toFixed(2),
+    );
+  }
+
+  // descontoValor está em "unidade humana" (pontos percentuais, ou reais
+  // quando VALOR_FIXO) — converte pra como o backend guarda (ver
+  // Plano.descontoAnualValor no schema: percentual cru, ou centavos).
+  async function salvarDesconto(id: string) {
+    const bruto = parseFloat(descontoValor.replace(",", "."));
+    if (Number.isNaN(bruto) || bruto < 0) return;
+    const descontoAnualValor = descontoTipo === TipoDesconto.PERCENTUAL ? Math.round(bruto) : Math.round(bruto * 100);
+    await api.patch(`/planos/${id}`, { descontoAnualTipo: descontoTipo, descontoAnualValor });
+    setEditandoDescontoId(null);
+    carregar();
+  }
+
   async function criarPlano(e: React.FormEvent) {
     e.preventDefault();
     setErro(null);
     const precoCentavos = Math.round(parseFloat(novoPlano.precoReais.replace(",", ".")) * 100);
     if (!novoPlano.nome.trim()) return setErro("Digite o nome do plano.");
     if (Number.isNaN(precoCentavos) || precoCentavos <= 0) return setErro("Digite um preço válido (ex: 79,00).");
+    const descontoBruto = novoPlano.descontoAnualValor.trim() ? parseFloat(novoPlano.descontoAnualValor.replace(",", ".")) : 0;
+    if (Number.isNaN(descontoBruto) || descontoBruto < 0) return setErro("Digite um desconto anual válido (ou deixe em branco).");
 
     setSalvando(true);
     try {
@@ -61,6 +97,8 @@ export default function PlanosPage() {
           .split("\n")
           .map((r) => r.trim())
           .filter(Boolean),
+        descontoAnualTipo: novoPlano.descontoAnualTipo,
+        descontoAnualValor: novoPlano.descontoAnualTipo === TipoDesconto.PERCENTUAL ? Math.round(descontoBruto) : Math.round(descontoBruto * 100),
       });
       setNovoPlano(NOVO_PLANO_VAZIO);
       setFormAberto(false);
@@ -114,6 +152,43 @@ export default function PlanosPage() {
             rows={3}
             style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }}
           />
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <span style={{ fontSize: 12.5, color: "#837A73", flex: 1 }}>Desconto no plano anual (opcional)</span>
+            <select
+              value={novoPlano.descontoAnualTipo}
+              onChange={(e) => setNovoPlano((p) => ({ ...p, descontoAnualTipo: e.target.value as TipoDesconto }))}
+              style={{ ...inputStyle, flex: 1 }}
+            >
+              <option value={TipoDesconto.PERCENTUAL}>% de desconto</option>
+              <option value={TipoDesconto.VALOR_FIXO}>R$ de desconto</option>
+            </select>
+            <input
+              placeholder={novoPlano.descontoAnualTipo === TipoDesconto.PERCENTUAL ? "Ex: 15" : "Ex: 100,00"}
+              value={novoPlano.descontoAnualValor}
+              onChange={(e) => setNovoPlano((p) => ({ ...p, descontoAnualValor: e.target.value }))}
+              style={{ ...inputStyle, flex: 1 }}
+            />
+          </div>
+          {novoPlano.precoReais && !Number.isNaN(parseFloat(novoPlano.precoReais.replace(",", "."))) && (
+            <div style={{ fontSize: 12, color: "#837A73" }}>
+              Preço anual resultante:{" "}
+              <strong style={{ color: "#3A3530" }}>
+                {centavosParaReais(
+                  calcularPrecoAnualCentavos(
+                    Math.round(parseFloat(novoPlano.precoReais.replace(",", ".")) * 100),
+                    novoPlano.descontoAnualTipo,
+                    (() => {
+                      const bruto = parseFloat((novoPlano.descontoAnualValor || "0").replace(",", "."));
+                      const seguro = Number.isNaN(bruto) ? 0 : bruto;
+                      return novoPlano.descontoAnualTipo === TipoDesconto.PERCENTUAL ? seguro : Math.round(seguro * 100);
+                    })(),
+                  ),
+                )}
+              </strong>
+            </div>
+          )}
+
           <button type="submit" disabled={salvando} style={{ ...btnPrimary, width: 160 }}>
             {salvando ? "Criando…" : "Criar plano"}
           </button>
@@ -153,6 +228,49 @@ export default function PlanosPage() {
                 </button>
               </>
             )}
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #F1EEE9" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#837A73", textTransform: "uppercase" }}>Plano anual</div>
+              {editandoDescontoId === plano.id ? (
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select
+                      value={descontoTipo}
+                      onChange={(e) => setDescontoTipo(e.target.value as TipoDesconto)}
+                      style={{ ...inputStyle, flex: 1, fontSize: 12.5 }}
+                    >
+                      <option value={TipoDesconto.PERCENTUAL}>% de desconto</option>
+                      <option value={TipoDesconto.VALOR_FIXO}>R$ de desconto</option>
+                    </select>
+                    <input
+                      value={descontoValor}
+                      onChange={(e) => setDescontoValor(e.target.value)}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                  </div>
+                  <button onClick={() => salvarDesconto(plano.id)} style={btnPrimary}>
+                    Salvar desconto
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 15, fontWeight: 800, marginTop: 4 }}>
+                    {centavosParaReais(calcularPrecoAnualCentavos(plano.precoCentavos, plano.descontoAnualTipo, plano.descontoAnualValor))}
+                    <span style={{ fontSize: 12, color: "#837A73", fontWeight: 600 }}>
+                      {" "}
+                      (
+                      {plano.descontoAnualTipo === TipoDesconto.PERCENTUAL
+                        ? `${plano.descontoAnualValor}% off`
+                        : `${centavosParaReais(plano.descontoAnualValor)} off`}
+                      )
+                    </span>
+                  </div>
+                  <button onClick={() => iniciarEdicaoDesconto(plano)} style={{ ...btnSecondary, width: "100%", marginTop: 8 }}>
+                    Editar desconto anual
+                  </button>
+                </>
+              )}
+            </div>
 
             <button onClick={() => alternarAtivo(plano)} style={{ ...btnLink, marginTop: 8 }}>
               {plano.ativo ? "Desativar plano" : "Reativar plano"}

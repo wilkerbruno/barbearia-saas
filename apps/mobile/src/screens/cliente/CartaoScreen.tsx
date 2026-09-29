@@ -10,6 +10,15 @@ import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
+import {
+  HTML_DEVICE_ID,
+  corBandeira,
+  formatarCpf,
+  formatarNumeroCartao,
+  formatarValidade,
+  nomeBandeiraExibicao,
+  tokenizarCartao,
+} from "../../payments/cartaoNativo";
 
 type Props = NativeStackScreenProps<HomeStackParamList, "Cartao">;
 
@@ -17,39 +26,10 @@ type Props = NativeStackScreenProps<HomeStackParamList, "Cartao">;
 // novo" em vez de usar um dos salvos (ver seção "Cartão" no JSX abaixo).
 const NOVO_CARTAO = "novo" as const;
 
-// Página mínima carregada numa WebView OCULTA (nunca aparece na tela) só pra
-// rodar o script antifraude do próprio Mercado Pago (security.js) — ele
-// precisa de um DOM/`window` de verdade, que o React Native não tem
-// nativamente, daí a WebView. Assim que o script preenche
-// `window.MP_DEVICE_SESSION_ID`, manda esse valor de volta pro app via
-// `postMessage` (ver onMessage abaixo) — é esse id que vai no header
-// X-Meli-Session-Id da cobrança (ver MercadoPagoService.criarPagamentoCartao),
-// ajudando o antifraude do MP a avaliar melhor o risco (ver histórico de
-// recusas "high_risk"). Se o script não carregar/demorar demais (sem
-// internet, bloqueio de rede etc.), manda uma mensagem vazia depois de um
-// tempo — a coleta é só um extra, nunca pode travar o pagamento.
-const HTML_DEVICE_ID = `
-<!DOCTYPE html>
-<html>
-  <head><meta charset="utf-8" /></head>
-  <body>
-    <script src="https://www.mercadopago.com/v2/security.js" view="checkout"></script>
-    <script>
-      var tentativas = 0;
-      var intervalo = setInterval(function () {
-        tentativas++;
-        if (window.MP_DEVICE_SESSION_ID) {
-          clearInterval(intervalo);
-          window.ReactNativeWebView.postMessage(window.MP_DEVICE_SESSION_ID);
-        } else if (tentativas > 25) {
-          clearInterval(intervalo);
-          window.ReactNativeWebView.postMessage("");
-        }
-      }, 200);
-    </script>
-  </body>
-</html>
-`;
+// HTML_DEVICE_ID (WebView oculta que roda o antifraude do Mercado Pago) mora
+// em payments/cartaoNativo.ts — reusado por AssinaturaPagamentoScreen (dono
+// pagando a própria mensalidade do SaaS com o mesmo mecanismo). Ver o
+// comentário completo lá (histórico do ticket WCS-50070).
 
 // Formulário nativo de cartão — o cliente digita os dados AQUI, dentro do
 // app, e eles nunca chegam ao nosso servidor: primeiro tokenizamos direto
@@ -185,21 +165,12 @@ export function CartaoScreen({ route, navigation }: Props) {
     });
   }
 
-  // Tokeniza direto com o Mercado Pago (chave pública) — usado tanto pro
-  // cartão novo (com os dados completos) quanto pro cartão salvo (com
-  // card_id+customer_id no lugar do número). Devolve só o token de uso único;
-  // o número do cartão em si nunca passa pelo nosso servidor.
-  async function tokenizar(corpo: Record<string, unknown>): Promise<string> {
-    const resposta = await fetch(`https://api.mercadopago.com/v1/card_tokens?public_key=${publicKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(corpo),
-    });
-    const corpoResposta: any = await resposta.json().catch(() => null);
-    if (!resposta.ok || !corpoResposta?.id) {
-      throw new Error(corpoResposta?.message ?? corpoResposta?.cause?.[0]?.description ?? "Confira os dados digitados e tente novamente.");
-    }
-    return corpoResposta.id as string;
+  // Tokeniza direto com o Mercado Pago (ver payments/cartaoNativo.ts) — usado
+  // tanto pro cartão novo (com os dados completos) quanto pro cartão salvo
+  // (com card_id+customer_id no lugar do número). Devolve só o token de uso
+  // único; o número do cartão em si nunca passa pelo nosso servidor.
+  function tokenizar(corpo: Record<string, unknown>): Promise<string> {
+    return tokenizarCartao(publicKey!, corpo);
   }
 
   // Salva o cartão recém-digitado pra próxima vez (ver checkbox "Salvar este
@@ -550,71 +521,6 @@ export function CartaoScreen({ route, navigation }: Props) {
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
-}
-
-// Cor de referência de cada bandeira só pro selo visual (não são os logos
-// oficiais — evitamos embutir marca registrada de terceiros; o texto já
-// deixa claro qual bandeira foi identificada, que é o que importa pra
-// conferir visualmente sem log).
-function corBandeira(paymentMethodId: string): string {
-  switch (paymentMethodId) {
-    case "visa":
-      return "#1A1F71";
-    case "master":
-      return "#EB5D24";
-    case "elo":
-      return "#000000";
-    case "amex":
-      return "#2E77BB";
-    case "hipercard":
-      return "#B10000";
-    case "diners":
-      return "#0079BE";
-    default:
-      return colors.inkMuted;
-  }
-}
-
-// Nome de exibição de um cartão SALVO a partir do payment_method.id que o
-// Mercado Pago devolveu ao salvar (ver CartaoSalvo.bandeira) — o cartão novo
-// já tem esse nome pronto em `identificarBandeiraLocal` (campo `nome`), mas
-// o salvo só guarda o id (ex: "visa"), daí esse mapa separado.
-function nomeBandeiraExibicao(paymentMethodId: string): string {
-  switch (paymentMethodId) {
-    case "visa":
-      return "Visa";
-    case "master":
-      return "Mastercard";
-    case "elo":
-      return "Elo";
-    case "amex":
-      return "Amex";
-    case "hipercard":
-      return "Hipercard";
-    case "diners":
-      return "Diners";
-    default:
-      return paymentMethodId;
-  }
-}
-
-function formatarNumeroCartao(valor: string): string {
-  const digitos = valor.replace(/\D/g, "").slice(0, 19);
-  return digitos.replace(/(\d{4})(?=\d)/g, "$1 ");
-}
-
-function formatarValidade(valor: string): string {
-  const digitos = valor.replace(/\D/g, "").slice(0, 4);
-  if (digitos.length <= 2) return digitos;
-  return `${digitos.slice(0, 2)}/${digitos.slice(2)}`;
-}
-
-function formatarCpf(valor: string): string {
-  const digitos = valor.replace(/\D/g, "").slice(0, 11);
-  return digitos
-    .replace(/(\d{3})(?=\d)/, "$1.")
-    .replace(/(\d{3})\.(\d{3})(?=\d)/, "$1.$2.")
-    .replace(/(\d{3})\.(\d{3})\.(\d{3})(?=\d)/, "$1.$2.$3-");
 }
 
 const styles = StyleSheet.create({

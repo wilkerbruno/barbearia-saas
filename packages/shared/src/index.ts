@@ -427,6 +427,19 @@ export interface ResumoFinanceiro {
 
 // ============================= PLANOS E ASSINATURA DO SAAS =============================
 
+// Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
+export const TipoDesconto = {
+  PERCENTUAL: "PERCENTUAL",
+  VALOR_FIXO: "VALOR_FIXO",
+} as const;
+export type TipoDesconto = (typeof TipoDesconto)[keyof typeof TipoDesconto];
+
+export const PeriodicidadeAssinatura = {
+  MENSAL: "MENSAL",
+  ANUAL: "ANUAL",
+} as const;
+export type PeriodicidadeAssinatura = (typeof PeriodicidadeAssinatura)[keyof typeof PeriodicidadeAssinatura];
+
 export interface Plano {
   id: string;
   nome: string;
@@ -434,6 +447,20 @@ export interface Plano {
   limiteFuncionarios: number | null; // null = ilimitado
   recursos: string[];
   ativo: boolean;
+  // Desconto do plano ANUAL — ver calcularPrecoAnualCentavos abaixo.
+  descontoAnualTipo: TipoDesconto;
+  descontoAnualValor: number;
+}
+
+// Preço do plano anual (12x o mensal, com o desconto configurado pelo
+// SAAS_ADMIN — ver admin-web/planos). Usado tanto lá (preview do valor
+// enquanto configura) quanto no app (tela de Assinatura, ao escolher
+// periodicidade). Nunca deixa o resultado ficar negativo (um VALOR_FIXO maior
+// que o total anual zeraria a cobrança, não a tornaria negativa).
+export function calcularPrecoAnualCentavos(precoMensalCentavos: number, tipo: TipoDesconto, valor: number): number {
+  const totalSemDesconto = precoMensalCentavos * 12;
+  const descontoCentavos = tipo === TipoDesconto.PERCENTUAL ? Math.round((totalSemDesconto * valor) / 100) : Math.round(valor);
+  return Math.max(0, totalSemDesconto - descontoCentavos);
 }
 
 // Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
@@ -452,6 +479,7 @@ export interface Assinatura {
   status: StatusAssinatura;
   inicioEm: string;
   proximaCobrancaEm: string | null;
+  periodicidade: PeriodicidadeAssinatura;
 }
 
 // Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
@@ -470,6 +498,39 @@ export interface Fatura {
   vencimentoEm: string;
   status: StatusFatura;
   metodoPagamento?: string | null;
+}
+
+// Tentativa de pagamento nativo (Pix ou cartão, direto no app) da mensalidade
+// ou anuidade do SaaS — mesmo formato de Pagamento (agendamento do cliente),
+// só que sem grupoId/clienteId. Ver PagamentoAssinatura no schema e a tela de
+// Assinatura no mobile (mesmo componente de pagamento do cliente final).
+export interface PagamentoAssinatura {
+  id: string;
+  assinaturaId: string;
+  planoId: string;
+  periodicidade: PeriodicidadeAssinatura;
+  metodo: MetodoPagamento;
+  status: StatusPagamento;
+  valorCentavos: number;
+  pixQrCodeBase64?: string | null;
+  pixCopiaECola?: string | null;
+  desafio3dsUrl?: string | null;
+  criadoEm: string;
+}
+
+// Cartão salvo pelo DONO da barbearia pra pagar a própria mensalidade do SaaS
+// (conta da plataforma) — mesmo formato de CartaoSalvo (cliente final pagando
+// a barbearia), ver CartaoSalvoAssinatura no schema.
+export interface CartaoSalvoAssinatura {
+  id: string;
+  bandeira: string;
+  ultimosDigitos: string;
+  nomeTitular: string;
+  banco: string | null;
+  bin: string;
+  mercadoPagoCustomerId: string;
+  mercadoPagoCardId: string;
+  criadoEm: string;
 }
 
 // ============================= HELPERS =============================

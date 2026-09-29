@@ -1,5 +1,38 @@
 import { StatusAssinatura } from "@barbearia-saas/shared";
 
+// Estado mínimo necessário pra decidir o que fazer com `bloqueadaEm` numa
+// transição de status — ver dadosParaStatusPuro abaixo.
+export interface AssinaturaStatusAtual {
+  status: StatusAssinatura;
+  bloqueadaEm: Date | null;
+}
+
+// Ponto único que decide `bloqueadaEm`/`avisoVencimentoEnviadoEm` em
+// qualquer transição de status da assinatura (checkout/pagamento nativo
+// confirmado, cancelamento, ação manual do SAAS_ADMIN, webhook do Mercado
+// Pago, trial vencido) — nenhum lugar deve setar `status`/`bloqueadaEm` na
+// mão. Função pura (sem acessar o banco) pra poder ser usada tanto por
+// AssinaturasService quanto por AssinaturasPagamentoService (pagamento
+// nativo) sem criar uma dependência circular entre os dois. Regras:
+// - TRIAL/ATIVA: sempre limpa `bloqueadaEm` (conta em dia).
+// - INADIMPLENTE/CANCELADA: seta `bloqueadaEm = agora` só na transição de
+//   "em dia" -> "bloqueada" — se já estava bloqueada, mantém o instante
+//   original, senão um webhook duplicado (ex: MP reenviando o mesmo evento)
+//   ficaria empurrando pra sempre o relógio da carência do cliente.
+// Também zera `avisoVencimentoEnviadoEm` sempre que o novo status é
+// TRIAL/ATIVA — ciclo novo (renovou ou entrou no ar), então o aviso de "vai
+// vencer" precisa poder disparar de novo no próximo vencimento. Enquanto
+// fica bloqueada, deixa como está (undefined = Prisma não mexe no campo).
+export function dadosParaStatusPuro(status: StatusAssinatura, atual: AssinaturaStatusAtual) {
+  const eraBloqueada = atual.status === StatusAssinatura.INADIMPLENTE || atual.status === StatusAssinatura.CANCELADA;
+  const ficaBloqueada = status === StatusAssinatura.INADIMPLENTE || status === StatusAssinatura.CANCELADA;
+  let bloqueadaEm = atual.bloqueadaEm;
+  if (!ficaBloqueada) bloqueadaEm = null;
+  else if (!eraBloqueada) bloqueadaEm = new Date();
+  const avisoVencimentoEnviadoEm = ficaBloqueada ? undefined : null;
+  return { status, bloqueadaEm, avisoVencimentoEnviadoEm };
+}
+
 // Estado mínimo (de uma Assinatura) necessário pra calcular se ela já está
 // "fora da carência" — ou seja, se deve sumir pro cliente final. Extraído em
 // funções puras (sem acessar o banco) pra poder ser usado tanto num check

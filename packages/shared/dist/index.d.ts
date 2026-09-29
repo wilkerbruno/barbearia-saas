@@ -278,6 +278,16 @@ export interface ResumoFinanceiro {
         faturamentoCentavos: number;
     }>;
 }
+export declare const TipoDesconto: {
+    readonly PERCENTUAL: "PERCENTUAL";
+    readonly VALOR_FIXO: "VALOR_FIXO";
+};
+export type TipoDesconto = (typeof TipoDesconto)[keyof typeof TipoDesconto];
+export declare const PeriodicidadeAssinatura: {
+    readonly MENSAL: "MENSAL";
+    readonly ANUAL: "ANUAL";
+};
+export type PeriodicidadeAssinatura = (typeof PeriodicidadeAssinatura)[keyof typeof PeriodicidadeAssinatura];
 export interface Plano {
     id: string;
     nome: string;
@@ -285,7 +295,10 @@ export interface Plano {
     limiteFuncionarios: number | null;
     recursos: string[];
     ativo: boolean;
+    descontoAnualTipo: TipoDesconto;
+    descontoAnualValor: number;
 }
+export declare function calcularPrecoAnualCentavos(precoMensalCentavos: number, tipo: TipoDesconto, valor: number): number;
 export declare const StatusAssinatura: {
     readonly TRIAL: "TRIAL";
     readonly ATIVA: "ATIVA";
@@ -300,6 +313,7 @@ export interface Assinatura {
     status: StatusAssinatura;
     inicioEm: string;
     proximaCobrancaEm: string | null;
+    periodicidade: PeriodicidadeAssinatura;
 }
 export declare const StatusFatura: {
     readonly PAGA: "PAGA";
@@ -315,6 +329,30 @@ export interface Fatura {
     vencimentoEm: string;
     status: StatusFatura;
     metodoPagamento?: string | null;
+}
+export interface PagamentoAssinatura {
+    id: string;
+    assinaturaId: string;
+    planoId: string;
+    periodicidade: PeriodicidadeAssinatura;
+    metodo: MetodoPagamento;
+    status: StatusPagamento;
+    valorCentavos: number;
+    pixQrCodeBase64?: string | null;
+    pixCopiaECola?: string | null;
+    desafio3dsUrl?: string | null;
+    criadoEm: string;
+}
+export interface CartaoSalvoAssinatura {
+    id: string;
+    bandeira: string;
+    ultimosDigitos: string;
+    nomeTitular: string;
+    banco: string | null;
+    bin: string;
+    mercadoPagoCustomerId: string;
+    mercadoPagoCardId: string;
+    criadoEm: string;
 }
 export declare function centavosParaReais(centavos: number): string;
 export interface CartaoSalvo {

@@ -6,7 +6,14 @@ import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
 import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
 import { PushService } from "../push/push.service";
-import { estaForaDaCarencia, diasRestantesVencimento, DIAS_AVISO_VENCIMENTO } from "./assinatura-status.util";
+import { AssinaturasPagamentoService } from "./assinaturas-pagamento.service";
+import {
+  estaForaDaCarencia,
+  diasRestantesVencimento,
+  DIAS_AVISO_VENCIMENTO,
+  dadosParaStatusPuro,
+  AssinaturaStatusAtual,
+} from "./assinatura-status.util";
 
 // Casa o status devolvido pelo Mercado Pago (pagamento aprovado/pendente/
 // recusado) com o enum interno de Fatura.
@@ -16,13 +23,6 @@ function mapearStatusFatura(statusPagamento: string | null | undefined): StatusF
     return StatusFatura.PENDENTE;
   }
   return StatusFatura.ATRASADA; // rejected, cancelled, refunded, charged_back, etc.
-}
-
-// Estado mínimo necessário pra decidir o que fazer com `bloqueadaEm` numa
-// transição de status — ver AssinaturasService.dadosParaStatus.
-interface AssinaturaStatusAtual {
-  status: StatusAssinatura;
-  bloqueadaEm: Date | null;
 }
 
 @Injectable()
@@ -35,46 +35,61 @@ export class AssinaturasService {
     private mercadoPago: MercadoPagoService,
     private configuracoes: ConfiguracoesService,
     private push: PushService,
+    private pagamentoNativo: AssinaturasPagamentoService,
   ) {}
 
-  // Ponto único que decide `bloqueadaEm` em qualquer transição de status —
-  // toda mudança de status da assinatura (checkout confirmado, cancelamento,
-  // ação manual do SAAS_ADMIN, webhook do Mercado Pago, trial vencido) passa
-  // por aqui, nunca seta `status`/`bloqueadaEm` na mão. Regras:
-  // - TRIAL/ATIVA: sempre limpa `bloqueadaEm` (conta em dia).
-  // - INADIMPLENTE/CANCELADA: seta `bloqueadaEm = agora` só na transição de
-  //   "em dia" -> "bloqueada" — se já estava bloqueada, mantém o instante
-  //   original, senão um webhook duplicado (ex: MP reenviando o mesmo evento)
-  //   ficaria empurrando pra sempre o relógio da carência do cliente.
-  // Também zera `avisoVencimentoEnviadoEm` sempre que o novo status é
-  // TRIAL/ATIVA — ciclo novo (renovou ou entrou no ar), então o aviso de "vai
-  // vencer" precisa poder disparar de novo no próximo vencimento. Enquanto
-  // fica bloqueada, deixa como está (undefined = Prisma não mexe no campo).
+  // Wrapper fino em cima da função pura em assinatura-status.util.ts — ver lá
+  // pro comentário completo (regras de bloqueadaEm/avisoVencimentoEnviadoEm
+  // em qualquer transição de status). Extraída pra lá (em vez de só
+  // "não-private" aqui) porque AssinaturasPagamentoService também precisa
+  // dela e uma dependência de volta pra AssinaturasService criaria um ciclo
+  // (esse serviço delega pra AssinaturasPagamentoService no webhook de
+  // pagamento nativo — ver processarEventoPagamento abaixo).
   private dadosParaStatus(status: StatusAssinatura, atual: AssinaturaStatusAtual) {
-    const eraBloqueada = atual.status === StatusAssinatura.INADIMPLENTE || atual.status === StatusAssinatura.CANCELADA;
-    const ficaBloqueada = status === StatusAssinatura.INADIMPLENTE || status === StatusAssinatura.CANCELADA;
-    let bloqueadaEm = atual.bloqueadaEm;
-    if (!ficaBloqueada) bloqueadaEm = null;
-    else if (!eraBloqueada) bloqueadaEm = new Date();
-    const avisoVencimentoEnviadoEm = ficaBloqueada ? undefined : null;
-    return { status, bloqueadaEm, avisoVencimentoEnviadoEm };
+    return dadosParaStatusPuro(status, atual);
   }
 
   // Checagem "preguiçosa" (sem job agendado): se o trial passou do prazo e a
-  // assinatura ainda não foi paga, vira CANCELADA na hora. Chamado sempre que
-  // alguém olha pra essa assinatura (minhaAssinatura, o AssinaturaGuard, a
-  // listagem pública de barbearias) — assim o status nunca fica "TRIAL"
-  // visivelmente vencido esperando um cron rodar.
+  // assinatura ainda não foi paga, vira CANCELADA na hora; se uma assinatura
+  // ATIVA sem cobrança automática (ver comentário em
+  // Assinatura.gatewayAssinaturaId — pagamento nativo, sem Preapproval) passou
+  // da data da próxima cobrança sem um PagamentoAssinatura aprovado, vira
+  // INADIMPLENTE na hora. Assinaturas ANTIGAS com gatewayAssinaturaId
+  // preenchido (Preapproval ainda ativa) NUNCA passam por esse segundo check
+  // — quem avisa a cobrança/falha delas é o webhook do Mercado Pago
+  // (tratarWebhookPreapproval), não esse lazy check; misturar os dois faria
+  // uma assinatura com cobrança automática em dia ser marcada INADIMPLENTE
+  // só por o webhook ainda não ter chegado.
+  //
+  // Chamado sempre que alguém olha pra essa assinatura (minhaAssinatura, o
+  // AssinaturaGuard, a listagem pública de barbearias) — assim o status nunca
+  // fica visivelmente vencido esperando um cron rodar.
   async expirarTrialSeVencido(barbeariaId: string) {
     const assinatura = await this.prisma.assinatura.findUnique({ where: { barbeariaId } });
     if (!assinatura) return null;
-    const venceu = assinatura.status === StatusAssinatura.TRIAL && assinatura.trialTerminaEm && assinatura.trialTerminaEm.getTime() <= Date.now();
-    if (!venceu) return assinatura;
 
-    return this.prisma.assinatura.update({
-      where: { barbeariaId },
-      data: this.dadosParaStatus(StatusAssinatura.CANCELADA, assinatura),
-    });
+    const trialVenceu =
+      assinatura.status === StatusAssinatura.TRIAL && assinatura.trialTerminaEm && assinatura.trialTerminaEm.getTime() <= Date.now();
+    if (trialVenceu) {
+      return this.prisma.assinatura.update({
+        where: { barbeariaId },
+        data: this.dadosParaStatus(StatusAssinatura.CANCELADA, assinatura),
+      });
+    }
+
+    const cobrancaNativaVenceu =
+      assinatura.status === StatusAssinatura.ATIVA &&
+      !assinatura.gatewayAssinaturaId &&
+      assinatura.proximaCobrancaEm &&
+      assinatura.proximaCobrancaEm.getTime() <= Date.now();
+    if (cobrancaNativaVenceu) {
+      return this.prisma.assinatura.update({
+        where: { barbeariaId },
+        data: this.dadosParaStatus(StatusAssinatura.INADIMPLENTE, assinatura),
+      });
+    }
+
+    return assinatura;
   }
 
   // Usado pelo AssinaturaGuard: equipe (funcionário + admin da barbearia) é
@@ -278,8 +293,24 @@ export class AssinaturasService {
         await this.tratarWebhookPreapproval(String(dataId));
       } else if (tipo === "subscription_authorized_payment") {
         await this.tratarWebhookPagamentoAutorizado(String(dataId));
-      } else if (tipo === "payment") {
-        await this.tratarWebhookPagamentoAvulso(String(dataId));
+      } else if (tipo === "payment" || tipo === "order") {
+        // "order" cobre cartão via Orders API (ver MercadoPagoService.
+        // criarPagamentoCartao) — mesmo tipo de evento que o webhook do
+        // cliente final (WebhooksService) já trata pro pagamento de
+        // agendamento. Tenta primeiro o pagamento NATIVO da assinatura
+        // (Pix/cartão direto no app — ver AssinaturasPagamentoService); só
+        // cai no fluxo legado de Preapproval se o external_reference não for
+        // dessa feature (payment avulso vinculado a uma preapproval antiga).
+        const detalhe = await this.mercadoPago.buscarPayment(String(dataId));
+        const tratadoPeloPagamentoNativo = await this.pagamentoNativo.tratarWebhookPagamento(String(dataId), detalhe.externalReference);
+        if (!tratadoPeloPagamentoNativo) {
+          await this.registrarFaturaDoPagamento({
+            externalReference: detalhe.externalReference,
+            preapprovalId: null,
+            paymentId: String(dataId),
+            idFallbackParaFatura: String(dataId),
+          });
+        }
       }
     } catch (e) {
       // Registra e segue — não queremos que o Mercado Pago fique reenviando
@@ -334,19 +365,6 @@ export class AssinaturasService {
       preapprovalId: autorizado.preapprovalId,
       paymentId: autorizado.paymentId,
       idFallbackParaFatura: authorizedPaymentId,
-    });
-  }
-
-  // Alguns pagamentos avulsos (não vinculados a uma preapproval) também
-  // chegam nesse mesmo webhook — só processamos se conseguirmos casar com uma
-  // assinatura via external_reference (ver MercadoPagoService).
-  private async tratarWebhookPagamentoAvulso(paymentId: string) {
-    const pagamento = await this.mercadoPago.buscarPayment(paymentId);
-    await this.registrarFaturaDoPagamento({
-      externalReference: pagamento.externalReference,
-      preapprovalId: null,
-      paymentId,
-      idFallbackParaFatura: paymentId,
     });
   }
 

@@ -1,13 +1,25 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, AppState, Linking, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
-import { Plano, StatusAssinatura } from "@barbearia-saas/shared";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import {
+  MetodoPagamento,
+  PagamentoAssinatura,
+  PeriodicidadeAssinatura,
+  Plano,
+  StatusAssinatura,
+  calcularPrecoAnualCentavos,
+  centavosParaReais,
+} from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
-import { colors, spacing } from "../../theme/tokens";
+import { colors, radius, spacing } from "../../theme/tokens";
+import { MaisStackParamList } from "../../navigation/MaisStack";
+
+type Props = NativeStackScreenProps<MaisStackParamList, "Assinatura">;
 
 interface AssinaturaDetalhada {
   status: StatusAssinatura;
@@ -29,21 +41,33 @@ function diasRestantes(dataIso: string): number {
 }
 
 // A barbearia gerencia a própria mensalidade do SaaS aqui: plano atual,
-// próxima cobrança e troca de plano. Trocar de plano abre o checkout do
-// Mercado Pago (fora do app) pro dono autorizar a cobrança recorrente com o
-// cartão dele — a troca só é efetivada de fato quando o pagamento é
-// confirmado. Essa também é a tela pra onde o RootNavigator manda o dono na
-// marra quando a assinatura não está em dia (trial vencido ou mensalidade
-// pendente) — ver authStore.assinaturaBloqueada — então ela também cumpre o
-// papel de "resolver o bloqueio".
-export function AssinaturaScreen() {
+// próxima cobrança e pagamento. Pagar (ou trocar de plano) é feito com o
+// mesmo mecanismo nativo que o cliente final usa pra pagar um agendamento —
+// Pix ou cartão tokenizado direto no app (ver abrirPagamento/pagar acima) —
+// sem sair pro checkout externo do Mercado Pago; a assinatura só volta a
+// ficar em dia quando o pagamento é de fato confirmado (Pix cai na tela de
+// pendente com polling, cartão tokeniza e cobra na hora). Essa também é a
+// tela pra onde o RootNavigator manda o dono na marra quando a assinatura
+// não está em dia (trial vencido ou mensalidade pendente) — ver
+// authStore.assinaturaBloqueada — então ela também cumpre o papel de
+// "resolver o bloqueio".
+export function AssinaturaScreen({ navigation }: Props) {
   const setAssinaturaBloqueada = useAuthStore((s) => s.setAssinaturaBloqueada);
   const logout = useAuthStore((s) => s.logout);
   const [assinatura, setAssinatura] = useState<AssinaturaDetalhada | null>(null);
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [mostrarPlanos, setMostrarPlanos] = useState(false);
-  const [abrindoCheckout, setAbrindoCheckout] = useState<string | null>(null);
   const [atualizando, setAtualizando] = useState(false);
+
+  // Plano cujo painel de pagamento (periodicidade + Pix/cartão) está aberto —
+  // ver Button "Selecionar plano" dentro do map abaixo. Pagamento nativo
+  // (cartão tokenizado no app, ou Pix, mesmo mecanismo que o cliente final
+  // usa pra pagar um agendamento) substitui o checkout externo do Mercado
+  // Pago que existia aqui antes.
+  const [planoEmPagamentoId, setPlanoEmPagamentoId] = useState<string | null>(null);
+  const [periodicidadeEscolhida, setPeriodicidadeEscolhida] = useState<PeriodicidadeAssinatura>(PeriodicidadeAssinatura.MENSAL);
+  const [metodoEscolhido, setMetodoEscolhido] = useState<MetodoPagamento>(MetodoPagamento.PIX);
+  const [pagando, setPagando] = useState(false);
 
   const carregar = useCallback(async () => {
     const [assinaturaRes, planosRes] = await Promise.all([
@@ -83,16 +107,43 @@ export function AssinaturaScreen() {
     }
   }
 
-  async function trocarPlano(planoId: string) {
-    setAbrindoCheckout(planoId);
+  function abrirPagamento(planoId: string) {
+    setPlanoEmPagamentoId((atual) => (atual === planoId ? null : planoId));
+    setPeriodicidadeEscolhida(PeriodicidadeAssinatura.MENSAL);
+    setMetodoEscolhido(MetodoPagamento.PIX);
+  }
+
+  async function pagar(plano: Plano) {
+    const valorCentavos =
+      periodicidadeEscolhida === PeriodicidadeAssinatura.ANUAL
+        ? calcularPrecoAnualCentavos(plano.precoCentavos, plano.descontoAnualTipo, plano.descontoAnualValor)
+        : plano.precoCentavos;
+
+    // Cartão nunca cobra direto por aqui — precisa do formulário nativo
+    // (tokeniza e cobra na hora, sem sair do app), igual ao cliente final
+    // pagando um agendamento (ver AssinaturaPagamentoScreen/CartaoScreen).
+    if (metodoEscolhido === MetodoPagamento.CARTAO) {
+      navigation.navigate("AssinaturaPagamento", {
+        planoId: plano.id,
+        nomePlano: plano.nome,
+        periodicidade: periodicidadeEscolhida,
+        valorCentavos,
+      });
+      return;
+    }
+
+    setPagando(true);
     try {
-      const { data } = await api.post<{ initPoint: string }>("/assinaturas/minha/checkout", { planoId });
-      await Linking.openURL(data.initPoint);
-      setMostrarPlanos(false);
+      const { data } = await api.post<PagamentoAssinatura>("/assinaturas/minha/pagar", {
+        planoId: plano.id,
+        periodicidade: periodicidadeEscolhida,
+        metodoPagamento: MetodoPagamento.PIX,
+      });
+      navigation.navigate("AssinaturaPagamentoPendente", { pagamento: data });
     } catch (e: any) {
       Alert.alert("Não foi possível iniciar o pagamento", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
-      setAbrindoCheckout(null);
+      setPagando(false);
     }
   }
 
@@ -157,21 +208,67 @@ export function AssinaturaScreen() {
         {mostrarPlanos && (
           <View style={{ gap: spacing.sm }}>
             <Text style={styles.hint}>
-              Ao selecionar um plano, você vai abrir o checkout do Mercado Pago pra autorizar a cobrança mensal com seu
-              cartão. Depois de autorizar, volte aqui — a tela atualiza sozinha assim que o app volta pra frente.
+              Escolha um plano, a periodicidade e a forma de pagamento — é o mesmo jeito que o cliente usa pra pagar um
+              agendamento, direto no app, sem sair pra lugar nenhum.
             </Text>
-            {planos.map((p) => (
-              <Card key={p.id} style={{ gap: spacing.xs }}>
-                <Text style={styles.planName}>{p.nome} — {(p.precoCentavos / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês</Text>
-                <Text style={styles.meta}>{p.recursos.join(" · ")}</Text>
-                <Button
-                  label="Selecionar plano"
-                  onPress={() => trocarPlano(p.id)}
-                  loading={abrindoCheckout === p.id}
-                  disabled={abrindoCheckout !== null}
-                />
-              </Card>
-            ))}
+            {planos.map((p) => {
+              const painelAberto = planoEmPagamentoId === p.id;
+              const precoAnualCentavos = calcularPrecoAnualCentavos(p.precoCentavos, p.descontoAnualTipo, p.descontoAnualValor);
+              const valorEscolhido = periodicidadeEscolhida === PeriodicidadeAssinatura.ANUAL ? precoAnualCentavos : p.precoCentavos;
+              return (
+                <Card key={p.id} style={{ gap: spacing.xs }}>
+                  <Text style={styles.planName}>{p.nome} — {(p.precoCentavos / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês</Text>
+                  <Text style={styles.meta}>{p.recursos.join(" · ")}</Text>
+                  {p.descontoAnualValor > 0 && (
+                    <Text style={styles.descontoAnual}>No plano anual: {centavosParaReais(precoAnualCentavos)}/ano</Text>
+                  )}
+                  <Button label={painelAberto ? "Fechar" : "Selecionar plano"} onPress={() => abrirPagamento(p.id)} variant={painelAberto ? "secondary" : "primary"} />
+
+                  {painelAberto && (
+                    <View style={{ gap: spacing.sm, marginTop: spacing.xs }}>
+                      <Text style={styles.subLabel}>PERIODICIDADE</Text>
+                      <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                        <Pressable onPress={() => setPeriodicidadeEscolhida(PeriodicidadeAssinatura.MENSAL)} style={{ flex: 1 }}>
+                          <View style={[styles.chip, periodicidadeEscolhida === PeriodicidadeAssinatura.MENSAL && styles.chipSelecionado]}>
+                            <Text style={[styles.chipTexto, periodicidadeEscolhida === PeriodicidadeAssinatura.MENSAL && styles.chipTextoSelecionado]}>
+                              Mensal · {centavosParaReais(p.precoCentavos)}
+                            </Text>
+                          </View>
+                        </Pressable>
+                        <Pressable onPress={() => setPeriodicidadeEscolhida(PeriodicidadeAssinatura.ANUAL)} style={{ flex: 1 }}>
+                          <View style={[styles.chip, periodicidadeEscolhida === PeriodicidadeAssinatura.ANUAL && styles.chipSelecionado]}>
+                            <Text style={[styles.chipTexto, periodicidadeEscolhida === PeriodicidadeAssinatura.ANUAL && styles.chipTextoSelecionado]}>
+                              Anual · {centavosParaReais(precoAnualCentavos)}
+                            </Text>
+                          </View>
+                        </Pressable>
+                      </View>
+
+                      <Text style={styles.subLabel}>FORMA DE PAGAMENTO</Text>
+                      <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                        <Pressable onPress={() => setMetodoEscolhido(MetodoPagamento.PIX)} style={{ flex: 1 }}>
+                          <View style={[styles.chip, metodoEscolhido === MetodoPagamento.PIX && styles.chipSelecionado]}>
+                            <Text style={[styles.chipTexto, metodoEscolhido === MetodoPagamento.PIX && styles.chipTextoSelecionado]}>Pix</Text>
+                          </View>
+                        </Pressable>
+                        <Pressable onPress={() => setMetodoEscolhido(MetodoPagamento.CARTAO)} style={{ flex: 1 }}>
+                          <View style={[styles.chip, metodoEscolhido === MetodoPagamento.CARTAO && styles.chipSelecionado]}>
+                            <Text style={[styles.chipTexto, metodoEscolhido === MetodoPagamento.CARTAO && styles.chipTextoSelecionado]}>Cartão</Text>
+                          </View>
+                        </Pressable>
+                      </View>
+
+                      <Button
+                        label={`Pagar ${centavosParaReais(valorEscolhido)}`}
+                        onPress={() => pagar(p)}
+                        loading={pagando}
+                        disabled={pagando}
+                      />
+                    </View>
+                  )}
+                </Card>
+              );
+            })}
           </View>
         )}
 
@@ -209,4 +306,18 @@ const styles = StyleSheet.create({
   bloqueadaTexto: { fontSize: 12.5, color: colors.inkMuted, lineHeight: 18 },
   atualizarLink: { color: colors.accent, fontWeight: "700", fontSize: 13, textAlign: "center", marginTop: spacing.xs },
   cancelarLink: { color: colors.danger, fontWeight: "700", fontSize: 13, textAlign: "center", marginTop: spacing.sm },
+  descontoAnual: { fontSize: 12, fontWeight: "700", color: colors.accent },
+  subLabel: { fontSize: 11, fontWeight: "700", color: colors.inkMuted },
+  chip: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    alignItems: "center",
+  },
+  chipSelecionado: { backgroundColor: colors.accent, borderColor: colors.accent },
+  chipTexto: { fontSize: 12.5, fontWeight: "700", color: colors.ink },
+  chipTextoSelecionado: { color: colors.accentInk },
 });

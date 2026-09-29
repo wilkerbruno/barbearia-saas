@@ -1,9 +1,11 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch, Post } from "@nestjs/common";
 import { Papel } from "@barbearia-saas/shared";
 import { AssinaturasService } from "./assinaturas.service";
+import { AssinaturasPagamentoService } from "./assinaturas-pagamento.service";
 import { CriarCheckoutDto } from "./dto/criar-checkout.dto";
 import { MudarPlanoDto } from "./dto/mudar-plano.dto";
 import { DefinirStatusAssinaturaDto } from "./dto/definir-status-assinatura.dto";
+import { PagarAssinaturaDto } from "./dto/pagar-assinatura.dto";
 import { Roles } from "../common/decorators/roles.decorator";
 import { PermitirAssinaturaBloqueada } from "../common/decorators/permitir-assinatura-bloqueada.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -11,7 +13,10 @@ import { AuthUser } from "../auth/jwt.strategy";
 
 @Controller()
 export class AssinaturasController {
-  constructor(private assinaturasService: AssinaturasService) {}
+  constructor(
+    private assinaturasService: AssinaturasService,
+    private pagamentoNativo: AssinaturasPagamentoService,
+  ) {}
 
   // @PermitirAssinaturaBloqueada nas três rotas "minha/*": é exatamente o que
   // o dono precisa acessar quando a barbearia está bloqueada (ver a tela de
@@ -42,6 +47,42 @@ export class AssinaturasController {
   cancelar(@CurrentUser() user: AuthUser) {
     if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
     return this.assinaturasService.cancelar(user.barbeariaId);
+  }
+
+  // ==================== Pagamento nativo (Pix/cartão, sem sair do app) ====================
+  // Substitui, pra quem está pagando agora, o checkout externo acima — ver
+  // AssinaturasPagamentoService. Mesmas rotas "minha/*", mesmo motivo de
+  // @PermitirAssinaturaBloqueada.
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @PermitirAssinaturaBloqueada()
+  @Get("assinaturas/minha/mercadopago-public-key")
+  mercadoPagoPublicKey() {
+    return { publicKey: this.pagamentoNativo.publicKeyPlataforma };
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @PermitirAssinaturaBloqueada()
+  @Post("assinaturas/minha/pagar")
+  pagar(@Body() dto: PagarAssinaturaDto, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.pagamentoNativo.pagar(user.barbeariaId, user.id, dto);
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @PermitirAssinaturaBloqueada()
+  @Get("assinaturas/minha/pagamentos/:id")
+  buscarPagamento(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.pagamentoNativo.buscarPagamento(id, user.barbeariaId);
+  }
+
+  @Roles(Papel.BARBEARIA_ADMIN)
+  @PermitirAssinaturaBloqueada()
+  @Patch("assinaturas/minha/pagamentos/:id/cancelar")
+  cancelarPagamentoPendente(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    if (!user.barbeariaId) throw new ForbiddenException("Usuário sem barbearia associada.");
+    return this.pagamentoNativo.cancelarPendente(id, user.barbeariaId);
   }
 
   // Versão enxuta pro pop-up de "assinatura vencendo" no app — acessível

@@ -3,7 +3,8 @@
 // e o painel web do SaaS (Next.js). Mantenha isso em sincronia com
 // apps/api/prisma/schema.prisma sempre que o modelo de dados mudar.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.StatusFatura = exports.StatusAssinatura = exports.StatusAssinaturaPacote = exports.StatusPagamento = exports.MetodoPagamento = exports.AVISO_NAO_COMPARECIMENTO = exports.OrigemAgendamento = exports.StatusAgendamento = exports.Papel = void 0;
+exports.StatusFatura = exports.StatusAssinatura = exports.PeriodicidadeAssinatura = exports.TipoDesconto = exports.StatusAssinaturaPacote = exports.StatusPagamento = exports.MetodoPagamento = exports.AVISO_NAO_COMPARECIMENTO = exports.OrigemAgendamento = exports.StatusAgendamento = exports.Papel = void 0;
+exports.calcularPrecoAnualCentavos = calcularPrecoAnualCentavos;
 exports.centavosParaReais = centavosParaReais;
 exports.identificarBandeiraLocal = identificarBandeiraLocal;
 // ============================= PAPÉIS (RBAC) =============================
@@ -62,6 +63,26 @@ exports.StatusAssinaturaPacote = {
     INADIMPLENTE: "INADIMPLENTE",
     CANCELADA: "CANCELADA",
 };
+// ============================= PLANOS E ASSINATURA DO SAAS =============================
+// Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
+exports.TipoDesconto = {
+    PERCENTUAL: "PERCENTUAL",
+    VALOR_FIXO: "VALOR_FIXO",
+};
+exports.PeriodicidadeAssinatura = {
+    MENSAL: "MENSAL",
+    ANUAL: "ANUAL",
+};
+// Preço do plano anual (12x o mensal, com o desconto configurado pelo
+// SAAS_ADMIN — ver admin-web/planos). Usado tanto lá (preview do valor
+// enquanto configura) quanto no app (tela de Assinatura, ao escolher
+// periodicidade). Nunca deixa o resultado ficar negativo (um VALOR_FIXO maior
+// que o total anual zeraria a cobrança, não a tornaria negativa).
+function calcularPrecoAnualCentavos(precoMensalCentavos, tipo, valor) {
+    const totalSemDesconto = precoMensalCentavos * 12;
+    const descontoCentavos = tipo === exports.TipoDesconto.PERCENTUAL ? Math.round((totalSemDesconto * valor) / 100) : Math.round(valor);
+    return Math.max(0, totalSemDesconto - descontoCentavos);
+}
 // Mesmo padrão explicado acima em Papel (compatível com o enum do Prisma).
 exports.StatusAssinatura = {
     TRIAL: "TRIAL",
