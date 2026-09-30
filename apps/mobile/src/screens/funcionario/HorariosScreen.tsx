@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { alertar } from "../../utils/alertaCompat";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -98,17 +99,17 @@ export function FuncionarioHorariosScreen() {
 
     for (const dia of ativos) {
       if (!FORMATO_HORA.test(dia.horaInicio) || !FORMATO_HORA.test(dia.horaFim)) {
-        return Alert.alert("Horário inválido", `Digite os horários de ${dia.label} no formato HH:mm (ex: 08:00).`);
+        return alertar("Horário inválido", `Digite os horários de ${dia.label} no formato HH:mm (ex: 08:00).`);
       }
       if (dia.horaFim <= dia.horaInicio) {
-        return Alert.alert("Horário inválido", `Em ${dia.label}, o horário final precisa ser depois do inicial.`);
+        return alertar("Horário inválido", `Em ${dia.label}, o horário final precisa ser depois do inicial.`);
       }
       if (dia.temAlmoco) {
         if (!FORMATO_HORA.test(dia.inicioAlmoco) || !FORMATO_HORA.test(dia.fimAlmoco)) {
-          return Alert.alert("Horário de almoço inválido", `Digite o almoço de ${dia.label} no formato HH:mm.`);
+          return alertar("Horário de almoço inválido", `Digite o almoço de ${dia.label} no formato HH:mm.`);
         }
         if (dia.inicioAlmoco < dia.horaInicio || dia.fimAlmoco > dia.horaFim || dia.fimAlmoco <= dia.inicioAlmoco) {
-          return Alert.alert("Horário de almoço inválido", `O almoço de ${dia.label} precisa estar dentro do expediente.`);
+          return alertar("Horário de almoço inválido", `O almoço de ${dia.label} precisa estar dentro do expediente.`);
         }
       }
     }
@@ -126,9 +127,9 @@ export function FuncionarioHorariosScreen() {
     setSalvandoHorarios(true);
     try {
       await api.post("/funcionarios/meus-horarios", dto);
-      Alert.alert("Horários salvos", "Sua agenda semanal foi atualizada.");
+      alertar("Horários salvos", "Sua agenda semanal foi atualizada.");
     } catch (e: any) {
-      Alert.alert("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setSalvandoHorarios(false);
     }
@@ -142,10 +143,10 @@ export function FuncionarioHorariosScreen() {
 
   async function salvarFolga() {
     if (!FORMATO_DATA.test(novaFolga.dataInicio) || !FORMATO_DATA.test(novaFolga.dataFim)) {
-      return Alert.alert("Data inválida", "Digite as datas no formato AAAA-MM-DD (ex: 2026-09-15).");
+      return alertar("Data inválida", "Digite as datas no formato AAAA-MM-DD (ex: 2026-09-15).");
     }
     if (!FORMATO_HORA.test(novaFolga.horaInicio) || !FORMATO_HORA.test(novaFolga.horaFim)) {
-      return Alert.alert("Horário inválido", "Digite os horários no formato HH:mm.");
+      return alertar("Horário inválido", "Digite os horários no formato HH:mm.");
     }
 
     // Offset fixo do horário de Brasília: mesma abordagem do agendamento do
@@ -153,7 +154,7 @@ export function FuncionarioHorariosScreen() {
     const inicio = `${novaFolga.dataInicio}T${novaFolga.horaInicio}:00-03:00`;
     const fim = `${novaFolga.dataFim}T${novaFolga.horaFim}:00-03:00`;
     if (new Date(fim) <= new Date(inicio)) {
-      return Alert.alert("Período inválido", "O fim da folga precisa ser depois do início.");
+      return alertar("Período inválido", "O fim da folga precisa ser depois do início.");
     }
 
     setSalvandoFolga(true);
@@ -162,7 +163,7 @@ export function FuncionarioHorariosScreen() {
       setFormFolgaAberto(false);
       carregar();
     } catch (e: any) {
-      Alert.alert("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setSalvandoFolga(false);
     }
@@ -173,7 +174,7 @@ export function FuncionarioHorariosScreen() {
       await api.delete(`/funcionarios/minhas-folgas/${id}`);
       carregar();
     } catch (e: any) {
-      Alert.alert("Não foi possível remover", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível remover", e?.response?.data?.message ?? "Tente de novo.");
     }
   }
 

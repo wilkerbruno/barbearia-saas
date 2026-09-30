@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { Alert, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { alertar } from "../../utils/alertaCompat";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -76,18 +77,18 @@ export function PacotesMensaisScreen() {
     const precoCentavos = Math.round(parseFloat(campos.precoReais.replace(",", ".")) * 100);
     const vezesPorSemana = parseInt(campos.vezesPorSemana, 10);
 
-    if (!nome) return Alert.alert("Falta o nome", "Digite o nome do pacote.");
+    if (!nome) return alertar("Falta o nome", "Digite o nome do pacote.");
     if (!Number.isFinite(precoCentavos) || precoCentavos <= 0) {
-      return Alert.alert("Preço inválido", "Digite um preço maior que zero (ex: 120,00).");
+      return alertar("Preço inválido", "Digite um preço maior que zero (ex: 120,00).");
     }
     if (!Number.isInteger(vezesPorSemana) || vezesPorSemana < 1) {
-      return Alert.alert("Cota inválida", "Digite quantas vezes por semana o cliente pode usar (mínimo 1).");
+      return alertar("Cota inválida", "Digite quantas vezes por semana o cliente pode usar (mínimo 1).");
     }
     if (servicoIdsSelecionados.length === 0) {
-      return Alert.alert("Selecione os serviços", "Escolha pelo menos um serviço pra incluir na cota.");
+      return alertar("Selecione os serviços", "Escolha pelo menos um serviço pra incluir na cota.");
     }
     if (diasSelecionados.length === 0) {
-      return Alert.alert("Selecione os dias", "Escolha em quais dias da semana dá pra usar o pacote.");
+      return alertar("Selecione os dias", "Escolha em quais dias da semana dá pra usar o pacote.");
     }
 
     const dto = {
@@ -108,7 +109,7 @@ export function PacotesMensaisScreen() {
       setFormAberto(false);
       carregar();
     } catch (e: any) {
-      Alert.alert("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setSalvando(false);
     }

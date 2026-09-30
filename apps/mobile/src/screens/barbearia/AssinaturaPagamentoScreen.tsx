@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,6 +8,7 @@ import { api, mensagemErroApi } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { DeviceIdCollector } from "../../components/DeviceIdCollector";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { MaisStackParamList } from "../../navigation/MaisStack";
 import {
@@ -163,12 +164,12 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
 
   async function confirmar() {
     if (!publicKey) {
-      Alert.alert("Cartão indisponível", "Pagamento com cartão está temporariamente indisponível. Tente pagar com Pix.");
+      alertar("Cartão indisponível", "Pagamento com cartão está temporariamente indisponível. Tente pagar com Pix.");
       return;
     }
     const erro = validarCampos();
     if (erro) {
-      Alert.alert("Confira os dados do cartão", erro);
+      alertar("Confira os dados do cartão", erro);
       return;
     }
 
@@ -188,7 +189,7 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
             security_code: cvvCartaoSalvo,
           });
         } catch (e: any) {
-          Alert.alert("Não foi possível validar o cartão", e?.message ?? "Confira o código de segurança e tente novamente.");
+          alertar("Não foi possível validar o cartão", e?.message ?? "Confira o código de segurança e tente novamente.");
           return;
         }
         cartaoBin = cartaoSelecionado.bin;
@@ -205,7 +206,7 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
             cardholder: { name: nomeTitular.trim(), identification: { type: "CPF", number: cpfLimpo } },
           });
         } catch (e: any) {
-          Alert.alert("Não foi possível validar o cartão", e?.message ?? "Confira os dados digitados e tente novamente.");
+          alertar("Não foi possível validar o cartão", e?.message ?? "Confira os dados digitados e tente novamente.");
           return;
         }
         cartaoBin = numeroLimpo.slice(0, 6);
@@ -227,14 +228,14 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
 
       navigation.replace("AssinaturaPagamentoPendente", { pagamento: data });
     } catch (e: any) {
-      Alert.alert("Pagamento não aprovado", mensagemErroApi(e, "Não foi possível concluir o pagamento. Tente outro cartão."));
+      alertar("Pagamento não aprovado", mensagemErroApi(e, "Não foi possível concluir o pagamento. Tente outro cartão."));
     } finally {
       setEnviando(false);
     }
   }
 
   function confirmarRemocao(cartao: CartaoSalvoAssinatura) {
-    Alert.alert(
+    alertar(
       "Remover cartão",
       `Remover o cartão ${nomeBandeiraExibicao(cartao.bandeira)} final ${cartao.ultimosDigitos.slice(-3)}?`,
       [
@@ -254,7 +255,7 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
                 return restante;
               });
             } catch {
-              Alert.alert("Não foi possível remover", "Tente novamente em instantes.");
+              alertar("Não foi possível remover", "Tente novamente em instantes.");
             } finally {
               setRemovendoId(null);
             }

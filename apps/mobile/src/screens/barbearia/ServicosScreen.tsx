@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { alertar } from "../../utils/alertaCompat";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { centavosParaReais, Servico } from "@barbearia-saas/shared";
@@ -57,12 +58,12 @@ export function ServicosScreen() {
     const duracaoMinutos = parseInt(campos.duracaoMinutos, 10);
     const precoCentavos = Math.round(parseFloat(campos.precoReais.replace(",", ".")) * 100);
 
-    if (!nome) return Alert.alert("Falta o nome", "Digite o nome do serviço.");
+    if (!nome) return alertar("Falta o nome", "Digite o nome do serviço.");
     if (!Number.isInteger(duracaoMinutos) || duracaoMinutos < 5) {
-      return Alert.alert("Duração inválida", "Digite uma duração em minutos (mínimo 5).");
+      return alertar("Duração inválida", "Digite uma duração em minutos (mínimo 5).");
     }
     if (!Number.isFinite(precoCentavos) || precoCentavos <= 0) {
-      return Alert.alert("Preço inválido", "Digite um preço maior que zero (ex: 45,00).");
+      return alertar("Preço inválido", "Digite um preço maior que zero (ex: 45,00).");
     }
 
     const dto = { nome, duracaoMinutos, precoCentavos, descricao: campos.descricao.trim() || undefined };
@@ -76,7 +77,7 @@ export function ServicosScreen() {
       setFormAberto(false);
       carregar();
     } catch (e: any) {
-      Alert.alert("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setSalvando(false);
     }

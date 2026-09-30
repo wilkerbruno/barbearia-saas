@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import * as WebBrowser from "expo-web-browser";
@@ -7,6 +7,7 @@ import { StatusConexaoMercadoPago } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, spacing } from "../../theme/tokens";
 
 // Deep link de volta pro app (ver apps/mobile/app.json "scheme") — o mesmo
@@ -14,6 +15,23 @@ import { colors, spacing } from "../../theme/tokens";
 // BarbeariasMercadoPagoController). openAuthSessionAsync fecha o navegador
 // sozinho assim que detecta uma navegação pra essa URL.
 const REDIRECT_DE_VOLTA = "barbeariasaas://mercadopago-conectado";
+
+// Na versão web esse fluxo não dá pra completar do jeito que está: o
+// WebBrowser.openAuthSessionAsync tem uma implementação real pra web (usa
+// window.open + localStorage), mas ela só fecha sozinha quando o navegador é
+// redirecionado de volta pra uma URL do MESMO domínio da versão web (onde
+// rodaria WebBrowser.maybeCompleteAuthSession()) — nunca pra um esquema tipo
+// "barbeariasaas://", que só existe dentro do app instalado. Sem isso, o
+// popup do Mercado Pago fica aberto pra sempre depois de autorizar (o
+// navegador não sabe pra onde ir). Fazer isso funcionar direito na web exige
+// a API aceitar um redirect_uri alternativo (uma página https do próprio
+// domínio, ex.: app.barberone.store/mercadopago-conectado) E cadastrar essa
+// mesma URL como redirect autorizado no aplicativo Mercado Pago Developers —
+// os dois lados fora do alcance só do código do app. Até isso existir, essa
+// ação específica (conectar/trocar a conta Mercado Pago da barbearia) fica só
+// no Android; o resto da tela (ver status conectado, desconectar) funciona
+// normalmente na web.
+const CONECTAR_DISPONIVEL_NA_WEB = Platform.OS !== "web";
 
 // É aqui que o dono da barbearia conecta a PRÓPRIA conta Mercado Pago
 // (modelo marketplace) — sem isso, os clientes não conseguem pagar pelo app
@@ -39,17 +57,17 @@ export function ConectarMercadoPagoScreen() {
       // Recarregamos o status de qualquer forma — é a fonte da verdade real.
       await carregar();
       if (resultado.type === "success" && resultado.url.includes("sucesso=0")) {
-        Alert.alert("Não foi possível conectar", "Tente novamente em alguns instantes.");
+        alertar("Não foi possível conectar", "Tente novamente em alguns instantes.");
       }
     } catch (e: any) {
-      Alert.alert("Não foi possível iniciar a conexão", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível iniciar a conexão", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setConectando(false);
     }
   }
 
   function desconectar() {
-    Alert.alert(
+    alertar(
       "Desconectar Mercado Pago?",
       "Clientes não vão conseguir pagar agendamentos nem pacotes mensais pelo app até você reconectar.",
       [
@@ -102,11 +120,20 @@ export function ConectarMercadoPagoScreen() {
           </Card>
         )}
 
-        <Button
-          label={status.conectado ? "Reconectar / trocar de conta" : "Conectar com Mercado Pago"}
-          onPress={conectar}
-          loading={conectando}
-        />
+        {CONECTAR_DISPONIVEL_NA_WEB ? (
+          <Button
+            label={status.conectado ? "Reconectar / trocar de conta" : "Conectar com Mercado Pago"}
+            onPress={conectar}
+            loading={conectando}
+          />
+        ) : (
+          <Card style={{ borderColor: colors.accent, gap: spacing.xs }}>
+            <Text style={styles.hint}>
+              {status.conectado ? "Reconectar ou trocar de conta" : "Conectar a conta"} Mercado Pago ainda precisa ser
+              feito pelo aplicativo Android — abra o app no celular e acesse Mais → Mercado Pago.
+            </Text>
+          </Card>
+        )}
 
         {status.conectado && (
           <Text style={styles.desconectarLink} onPress={desconectar}>

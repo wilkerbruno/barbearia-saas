@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from "react";
-import { Alert, FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { FlatList, StyleSheet, Text, TextInput, View } from "react-native";
+import { alertar } from "../../utils/alertaCompat";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -58,11 +59,11 @@ export function EquipeScreen({ navigation }: Props) {
     const senha = campos.senha;
     const comissaoPercentual = campos.comissaoPercentual ? parseInt(campos.comissaoPercentual, 10) : undefined;
 
-    if (!nome) return Alert.alert("Falta o nome", "Digite o nome do funcionário.");
-    if (!email.includes("@")) return Alert.alert("E-mail inválido", "Digite um e-mail válido.");
-    if (senha.length < 6) return Alert.alert("Senha muito curta", "A senha precisa ter pelo menos 6 caracteres.");
+    if (!nome) return alertar("Falta o nome", "Digite o nome do funcionário.");
+    if (!email.includes("@")) return alertar("E-mail inválido", "Digite um e-mail válido.");
+    if (senha.length < 6) return alertar("Senha muito curta", "A senha precisa ter pelo menos 6 caracteres.");
     if (comissaoPercentual !== undefined && (!Number.isInteger(comissaoPercentual) || comissaoPercentual < 0 || comissaoPercentual > 100)) {
-      return Alert.alert("Comissão inválida", "Digite um valor entre 0 e 100.");
+      return alertar("Comissão inválida", "Digite um valor entre 0 e 100.");
     }
 
     const dto = { nome, email, senha, cargo: campos.cargo.trim() || undefined, comissaoPercentual };
@@ -72,7 +73,7 @@ export function EquipeScreen({ navigation }: Props) {
       setFormAberto(false);
       carregar();
     } catch (e: any) {
-      Alert.alert("Não foi possível cadastrar", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível cadastrar", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setSalvando(false);
     }
@@ -83,7 +84,7 @@ export function EquipeScreen({ navigation }: Props) {
       await api.patch(`/funcionarios/${funcionario.id}`, { ativo: !funcionario.ativo });
       carregar();
     } catch (e: any) {
-      Alert.alert("Não foi possível atualizar", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível atualizar", e?.response?.data?.message ?? "Tente de novo.");
     }
   }
 

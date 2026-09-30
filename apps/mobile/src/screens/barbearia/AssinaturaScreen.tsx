@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Alert, AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { AppState, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { alertar } from "../../utils/alertaCompat";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -141,14 +142,14 @@ export function AssinaturaScreen({ navigation }: Props) {
       });
       navigation.navigate("AssinaturaPagamentoPendente", { pagamento: data });
     } catch (e: any) {
-      Alert.alert("Não foi possível iniciar o pagamento", mensagemErroApi(e));
+      alertar("Não foi possível iniciar o pagamento", mensagemErroApi(e));
     } finally {
       setPagando(false);
     }
   }
 
   async function cancelarAssinatura() {
-    Alert.alert("Cancelar assinatura?", "Sua barbearia perde acesso ao sistema no fim do período já pago.", [
+    alertar("Cancelar assinatura?", "Sua barbearia perde acesso ao sistema no fim do período já pago.", [
       { text: "Voltar", style: "cancel" },
       {
         text: "Cancelar assinatura",

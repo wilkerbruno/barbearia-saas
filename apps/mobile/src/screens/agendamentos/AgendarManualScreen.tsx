@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { alertar } from "../../utils/alertaCompat";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import { Ionicons } from "@expo/vector-icons";
@@ -149,7 +150,7 @@ export function AgendarManualScreen({ navigation }: Props) {
   async function confirmar() {
     if (!funcionarioId || !diaSelecionado || !horarioSelecionado || itensSelecionados.length === 0) return;
     if (!clienteNome.trim()) {
-      Alert.alert("Falta o nome do cliente", "Digite ao menos o nome de quem vai ser atendido.");
+      alertar("Falta o nome do cliente", "Digite ao menos o nome de quem vai ser atendido.");
       return;
     }
     setEnviando(true);
@@ -167,10 +168,10 @@ export function AgendarManualScreen({ navigation }: Props) {
         clienteAvulsoNome: clienteNome.trim(),
         clienteAvulsoTelefone: clienteTelefone.trim() || undefined,
       });
-      Alert.alert("Agendamento lançado!", "Já aparece na agenda.");
+      alertar("Agendamento lançado!", "Já aparece na agenda.");
       navigation.goBack();
     } catch (e: any) {
-      Alert.alert("Não foi possível lançar", e?.response?.data?.message ?? "Tente outro horário.");
+      alertar("Não foi possível lançar", e?.response?.data?.message ?? "Tente outro horário.");
     } finally {
       setEnviando(false);
     }
