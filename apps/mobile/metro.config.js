@@ -46,10 +46,30 @@ config.resolver.nodeModulesPaths = [
 const origemSingleton = path.join(projectRoot, "package.json");
 const REACT_SINGLETON = new Set(["react", "react/jsx-runtime", "react/jsx-dev-runtime"]);
 
+// O "zustand" (usado em src/store/authStore.ts) publica, pro build
+// "web"/ESM do pacote, um arquivo com `import.meta.env` — uma checagem de
+// modo dev pensada pra bundlers como Vite/Rollup, que ou substituem isso em
+// build time ou rodam o arquivo como módulo ES de verdade (<script
+// type="module">). O `expo export --platform web` (Metro) não faz nem uma
+// coisa nem outra: gera um <script> comum (sem type="module") com esse
+// trecho intacto, e o navegador quebra na hora com "Cannot use 'import.meta'
+// outside a module" — a PÁGINA INTEIRA fica em branco, porque o bundle nunca
+// chega a executar (visto ao investigar exatamente esse erro em produção).
+// O próprio pacote já publica uma build em CommonJS sem esse trecho,
+// destinada ao React Native (`exports["."]["react-native"]` no
+// package.json do zustand) — o nativo já usa essa build sozinho (esse `if`
+// nunca entra lá, só quando platform === "web"); aqui só forçamos o mesmo
+// arquivo a ser usado no bundle web também, evitando o `import.meta`.
+const ZUSTAND_CJS_ENTRY = { zustand: "index.js" };
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   const pedindoDoCalendario = context.originModulePath.includes(`${path.sep}react-native-calendars${path.sep}`);
   if (pedindoDoCalendario && REACT_SINGLETON.has(moduleName)) {
     return context.resolveRequest({ ...context, originModulePath: origemSingleton }, moduleName, platform);
+  }
+  if (platform === "web" && ZUSTAND_CJS_ENTRY[moduleName]) {
+    const zustandDir = path.dirname(require.resolve("zustand/package.json", { paths: [projectRoot] }));
+    return { type: "sourceFile", filePath: path.join(zustandDir, ZUSTAND_CJS_ENTRY[moduleName]) };
   }
   return context.resolveRequest(context, moduleName, platform);
 };
