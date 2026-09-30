@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { PriceTag } from "../../components/PriceTag";
 import { StarRating } from "../../components/StarRating";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { abrirNoMapa } from "../../utils/maps";
 import { HomeStackParamList } from "../../navigation/HomeStack";
@@ -106,12 +107,12 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
     try {
       const { data } = await api.post<AssinarPacoteMensalResultado>(`/pacotes-mensais/${pacote.id}/assinar`);
       await Linking.openURL(data.initPoint);
-      Alert.alert(
+      alertar(
         "Autorize no Mercado Pago",
         "Depois de autorizar a cobrança recorrente, acompanhe o status em Perfil > Meus pacotes mensais.",
       );
     } catch (e: any) {
-      Alert.alert("Não foi possível iniciar a assinatura", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível iniciar a assinatura", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setAssinandoId(null);
     }

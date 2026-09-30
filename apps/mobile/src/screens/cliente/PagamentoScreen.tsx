@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
@@ -8,6 +8,7 @@ import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { WebViewCompat } from "../../components/WebViewCompat";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
@@ -74,7 +75,7 @@ export function PagamentoScreen({ route, navigation }: Props) {
     const unsubscribe = navigation.addListener("beforeRemove", (e) => {
       if (pagamento.status !== StatusPagamento.PENDENTE) return;
       e.preventDefault();
-      Alert.alert(
+      alertar(
         "Sair sem pagar?",
         "Se você sair agora, o horário reservado será liberado e o agendamento não será confirmado.",
         [

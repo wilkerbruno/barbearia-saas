@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import { Card } from "../../components/Card";
 import { StatusBadge } from "../../components/StatusBadge";
 import { colors, spacing } from "../../theme/tokens";
 import { abrirNoMapa } from "../../utils/maps";
+import { alertar } from "../../utils/alertaCompat";
 
 // Vários serviços marcados juntos (mesmo grupoId — ver BookingScreen) aparecem
 // como um card só, com cada serviço listado e o valor total somado.
@@ -47,7 +48,7 @@ export function BookingsScreen() {
   );
 
   async function cancelar(id: string) {
-    Alert.alert("Cancelar agendamento?", "Essa ação não pode ser desfeita.", [
+    alertar("Cancelar agendamento?", "Essa ação não pode ser desfeita.", [
       { text: "Voltar", style: "cancel" },
       {
         text: "Cancelar agendamento",

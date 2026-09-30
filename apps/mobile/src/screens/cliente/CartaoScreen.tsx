@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,6 +8,7 @@ import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { DeviceIdCollector } from "../../components/DeviceIdCollector";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 import {
@@ -211,7 +212,7 @@ export function CartaoScreen({ route, navigation }: Props) {
 
   async function confirmar() {
     if (!publicKey) {
-      Alert.alert(
+      alertar(
         "Cartão indisponível",
         "Essa barbearia ainda não está pronta para receber pagamento com cartão. Tente pagar com Pix.",
       );
@@ -219,7 +220,7 @@ export function CartaoScreen({ route, navigation }: Props) {
     }
     const erro = validarCampos();
     if (erro) {
-      Alert.alert("Confira os dados do cartão", erro);
+      alertar("Confira os dados do cartão", erro);
       return;
     }
 
@@ -244,7 +245,7 @@ export function CartaoScreen({ route, navigation }: Props) {
             security_code: cvvCartaoSalvo,
           });
         } catch (e: any) {
-          Alert.alert("Não foi possível validar o cartão", e?.message ?? "Confira o código de segurança e tente novamente.");
+          alertar("Não foi possível validar o cartão", e?.message ?? "Confira o código de segurança e tente novamente.");
           return;
         }
         cartaoBin = cartaoSelecionado.bin;
@@ -264,7 +265,7 @@ export function CartaoScreen({ route, navigation }: Props) {
             },
           });
         } catch (e: any) {
-          Alert.alert("Não foi possível validar o cartão", e?.message ?? "Confira os dados digitados e tente novamente.");
+          alertar("Não foi possível validar o cartão", e?.message ?? "Confira os dados digitados e tente novamente.");
           return;
         }
         cartaoBin = numeroLimpo.slice(0, 6);
@@ -293,18 +294,18 @@ export function CartaoScreen({ route, navigation }: Props) {
         // Caso raro: uma assinatura de pacote mensal cobria o horário e o
         // servidor usou a cota dela em vez de cobrar o cartão (ver
         // AgendamentosService.encontrarAssinaturaPacoteElegivel).
-        Alert.alert("Agendamento confirmado!", "Reservado usando a cota do seu pacote mensal — o cartão não foi cobrado.");
+        alertar("Agendamento confirmado!", "Reservado usando a cota do seu pacote mensal — o cartão não foi cobrado.");
         navigation.navigate("Home");
       }
     } catch (e: any) {
-      Alert.alert("Pagamento não aprovado", e?.response?.data?.message ?? "Não foi possível concluir o pagamento. Tente outro cartão.");
+      alertar("Pagamento não aprovado", e?.response?.data?.message ?? "Não foi possível concluir o pagamento. Tente outro cartão.");
     } finally {
       setEnviando(false);
     }
   }
 
   function confirmarRemocao(cartao: CartaoSalvo) {
-    Alert.alert(
+    alertar(
       "Remover cartão",
       `Remover o cartão ${nomeBandeiraExibicao(cartao.bandeira)} final ${cartao.ultimosDigitos.slice(-3)}?`,
       [
@@ -324,7 +325,7 @@ export function CartaoScreen({ route, navigation }: Props) {
                 return restante;
               });
             } catch {
-              Alert.alert("Não foi possível remover", "Tente novamente em instantes.");
+              alertar("Não foi possível remover", "Tente novamente em instantes.");
             } finally {
               setRemovendoId(null);
             }

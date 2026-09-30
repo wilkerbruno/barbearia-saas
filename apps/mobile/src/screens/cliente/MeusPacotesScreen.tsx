@@ -1,11 +1,12 @@
 import React, { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, FlatList, Linking, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Linking, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { AssinarPacoteMensalResultado, AssinaturaPacoteCliente, centavosParaReais, StatusAssinaturaPacote } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, spacing } from "../../theme/tokens";
 
 const LABEL_STATUS: Record<StatusAssinaturaPacote, string> = {
@@ -35,14 +36,14 @@ export function MeusPacotesScreen() {
       const { data } = await api.post<AssinarPacoteMensalResultado>(`/pacotes-mensais/${assinatura.pacoteMensalId}/assinar`);
       await Linking.openURL(data.initPoint);
     } catch (e: any) {
-      Alert.alert("Não foi possível iniciar o pagamento", e?.response?.data?.message ?? "Tente de novo.");
+      alertar("Não foi possível iniciar o pagamento", e?.response?.data?.message ?? "Tente de novo.");
     } finally {
       setProcessandoId(null);
     }
   }
 
   function cancelar(assinatura: AssinaturaPacoteCliente) {
-    Alert.alert("Cancelar assinatura?", "Você perde acesso à cota do pacote — pode assinar de novo quando quiser.", [
+    alertar("Cancelar assinatura?", "Você perde acesso à cota do pacote — pode assinar de novo quando quiser.", [
       { text: "Voltar", style: "cancel" },
       {
         text: "Cancelar assinatura",

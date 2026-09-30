@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import { Ionicons } from "@expo/vector-icons";
@@ -17,6 +17,7 @@ import {
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { alertar } from "../../utils/alertaCompat";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
@@ -269,11 +270,11 @@ export function BookingScreen({ route, navigation }: Props) {
       if (data.pagamento) {
         navigation.replace("Pagamento", { pagamento: data.pagamento, aviso: data.aviso });
       } else {
-        Alert.alert("Agendamento confirmado!", "Reservado usando a cota do seu pacote mensal.");
+        alertar("Agendamento confirmado!", "Reservado usando a cota do seu pacote mensal.");
         navigation.navigate("Home");
       }
     } catch (e: any) {
-      Alert.alert("Não foi possível agendar", e?.response?.data?.message ?? "Tente outro horário.");
+      alertar("Não foi possível agendar", e?.response?.data?.message ?? "Tente outro horário.");
     } finally {
       setEnviando(false);
     }
