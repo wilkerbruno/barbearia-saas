@@ -10,7 +10,7 @@ import { ClienteTabs } from "./ClienteTabs";
 import { FuncionarioTabs } from "./FuncionarioTabs";
 import { BarbeariaTabs } from "./BarbeariaTabs";
 import { AcessoNaoSuportadoScreen } from "../screens/auth/AcessoNaoSuportadoScreen";
-import { AssinaturaScreen } from "../screens/barbearia/AssinaturaScreen";
+import { AssinaturaBloqueadaStack } from "./AssinaturaBloqueadaStack";
 import { FuncionarioAssinaturaBloqueadaScreen } from "../screens/funcionario/AssinaturaBloqueadaScreen";
 import { PopupVencimentoAssinatura } from "../components/PopupVencimentoAssinatura";
 import { registrarPushToken } from "../utils/push";
@@ -86,7 +86,7 @@ export function RootNavigator() {
       {usuario?.papel === Papel.CLIENTE && <ClienteTabs />}
       {usuario?.papel === Papel.FUNCIONARIO &&
         (assinaturaBloqueada ? <FuncionarioAssinaturaBloqueadaScreen onSair={logout} /> : <FuncionarioTabs />)}
-      {usuario?.papel === Papel.BARBEARIA_ADMIN && (assinaturaBloqueada ? <AssinaturaScreen /> : <BarbeariaTabs />)}
+      {usuario?.papel === Papel.BARBEARIA_ADMIN && (assinaturaBloqueada ? <AssinaturaBloqueadaStack /> : <BarbeariaTabs />)}
       {mostrarPopupVencimento && <PopupVencimentoAssinatura podeRenovar={usuario?.papel === Papel.BARBEARIA_ADMIN} />}
     </NavigationContainer>
   );
