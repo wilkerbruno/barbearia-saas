@@ -79,9 +79,14 @@ export function LoginScreen({ navigation }: Props) {
             variant="secondary"
             onPress={() => navigation.navigate("RegistrarCliente")}
           />
-          <Text style={styles.linkBarbearia} onPress={() => navigation.navigate("RegistrarBarbearia")}>
-            É dono de barbearia? Cadastre sua barbearia
-          </Text>
+          {/* Cadastro de barbearia usa WebView/seletor de foto ainda não
+              adaptados pra versão web (ver RegistrarBarbeariaScreen) — dono de
+              barbearia cadastra pelo app Android por enquanto. */}
+          {Platform.OS !== "web" && (
+            <Text style={styles.linkBarbearia} onPress={() => navigation.navigate("RegistrarBarbearia")}>
+              É dono de barbearia? Cadastre sua barbearia
+            </Text>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

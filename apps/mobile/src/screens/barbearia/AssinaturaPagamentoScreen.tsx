@@ -1,17 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { CartaoSalvoAssinatura, PagamentoAssinatura, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
 import { api, mensagemErroApi } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { DeviceIdCollector } from "../../components/DeviceIdCollector";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { MaisStackParamList } from "../../navigation/MaisStack";
 import {
-  HTML_DEVICE_ID,
   corBandeira,
   formatarCpf,
   formatarNumeroCartao,
@@ -61,6 +60,11 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
   // Device ID antifraude do Mercado Pago (ticket WCS-50070).
   const deviceIdRef = useRef<string | null>(null);
   const deviceIdResolvidoRef = useRef(false);
+  // Estável entre renders (deps vazias) — ver mesmo comentário em CartaoScreen.
+  const aoReceberDeviceId = useCallback((id: string | null) => {
+    deviceIdRef.current = id;
+    deviceIdResolvidoRef.current = true;
+  }, []);
 
   const numeroLimpo = numero.replace(/\D/g, "");
   const bandeira = useMemo(() => identificarBandeiraLocal(numeroLimpo), [numeroLimpo]);
@@ -262,16 +266,7 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <View style={styles.webviewOculta} pointerEvents="none">
-        <WebView
-          source={{ html: HTML_DEVICE_ID }}
-          onMessage={(evento) => {
-            deviceIdRef.current = evento.nativeEvent.data || null;
-            deviceIdResolvidoRef.current = true;
-          }}
-          javaScriptEnabled
-        />
-      </View>
+      <DeviceIdCollector onDeviceId={aoReceberDeviceId} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -441,7 +436,6 @@ export function AssinaturaPagamentoScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  webviewOculta: { position: "absolute", width: 1, height: 1, opacity: 0 },
   content: { padding: spacing.xl, gap: spacing.md, paddingBottom: spacing.xxl },
   sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.inkMuted, textTransform: "uppercase", marginTop: spacing.md },
   label: { fontSize: 12, color: colors.inkMuted },

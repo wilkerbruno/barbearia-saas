@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Modal, StyleSheet, Text, TextInput, View } from "react-native";
-import * as SecureStore from "expo-secure-store";
+import * as secureStorage from "../utils/secureStorage";
 import { AvaliacaoPendente } from "@barbearia-saas/shared";
 import { api } from "../api/client";
 import { Button } from "./Button";
@@ -41,7 +41,7 @@ export function PopupAvaliacaoPendente() {
     try {
       const { data } = await api.get<AvaliacaoPendente | null>("/barbearias/avaliacao-pendente");
       if (!data) return;
-      const dispensadasJson = await SecureStore.getItemAsync(CHAVE_DISPENSADAS);
+      const dispensadasJson = await secureStorage.getItem(CHAVE_DISPENSADAS);
       const dispensadas: string[] = dispensadasJson ? JSON.parse(dispensadasJson) : [];
       if (dispensadas.includes(data.barbeariaId)) return;
       setNota(0);
@@ -67,10 +67,10 @@ export function PopupAvaliacaoPendente() {
 
   async function fechar() {
     if (pendente) {
-      const dispensadasJson = await SecureStore.getItemAsync(CHAVE_DISPENSADAS);
+      const dispensadasJson = await secureStorage.getItem(CHAVE_DISPENSADAS);
       const dispensadas: string[] = dispensadasJson ? JSON.parse(dispensadasJson) : [];
       if (!dispensadas.includes(pendente.barbeariaId)) {
-        await SecureStore.setItemAsync(CHAVE_DISPENSADAS, JSON.stringify([...dispensadas, pendente.barbeariaId]));
+        await secureStorage.setItem(CHAVE_DISPENSADAS, JSON.stringify([...dispensadas, pendente.barbeariaId]));
       }
     }
     setPendente(null);

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import * as SecureStore from "expo-secure-store";
+import * as secureStorage from "../utils/secureStorage";
 import { Usuario } from "@barbearia-saas/shared";
 
 const TOKEN_KEY = "barbearia_saas_token";
@@ -29,15 +29,15 @@ export const useAuthStore = create<AuthState>((set) => ({
   assinaturaBloqueada: false,
 
   entrar: async (token, usuario) => {
-    await SecureStore.setItemAsync(TOKEN_KEY, token);
-    await SecureStore.setItemAsync(USER_KEY, JSON.stringify(usuario));
+    await secureStorage.setItem(TOKEN_KEY, token);
+    await secureStorage.setItem(USER_KEY, JSON.stringify(usuario));
     set({ token, usuario, assinaturaBloqueada: false });
   },
 
   restaurarSessao: async () => {
     const [token, usuarioJson] = await Promise.all([
-      SecureStore.getItemAsync(TOKEN_KEY),
-      SecureStore.getItemAsync(USER_KEY),
+      secureStorage.getItem(TOKEN_KEY),
+      secureStorage.getItem(USER_KEY),
     ]);
     set({
       token: token ?? null,
@@ -48,8 +48,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: () => {
-    SecureStore.deleteItemAsync(TOKEN_KEY);
-    SecureStore.deleteItemAsync(USER_KEY);
+    secureStorage.deleteItem(TOKEN_KEY);
+    secureStorage.deleteItem(USER_KEY);
     set({ token: null, usuario: null, assinaturaBloqueada: false });
   },
 

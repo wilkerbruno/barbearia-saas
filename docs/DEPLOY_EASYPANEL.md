@@ -197,3 +197,43 @@ vale trocar `prisma db push` por `prisma migrate deploy` com migrações
 versionadas (`prisma migrate dev` localmente gera os arquivos) — mais seguro
 para mudanças que alteram dados existentes, e cria um histórico do que mudou
 no banco ao longo do tempo.
+
+## 7. Deploy da versão web do app (clientes acessando pelo navegador)
+
+Além do painel (`apps/admin-web`), o próprio app do cliente final (agendar/
+pagar) também roda no navegador — via Expo Web (`react-native-web`), ver
+`apps/mobile/Dockerfile.web`. Serve como alternativa pros clientes com iPhone
+enquanto o app não está na App Store; dono/funcionário continuam usando o
+app Android normalmente (essa versão web bloqueia essas contas com um aviso,
+ver comentário em `RootNavigator.tsx`).
+
+1. Crie outro serviço do tipo **App**, do mesmo repositório.
+2. Configuração de build:
+   - **Build method**: Dockerfile
+   - **Build context / Root directory**: a **raiz do repositório** (mesmo
+     motivo da API/painel — o build usa `packages/shared`)
+   - **Dockerfile path**: `apps/mobile/Dockerfile.web`
+   - **Porta**: `3002`
+3. **Build variables** (não "Environment variables" — pelo mesmo motivo do
+   `NEXT_PUBLIC_API_URL` do painel: essa URL é gravada direto no JavaScript
+   que vai pro navegador no momento do build):
+
+   ```
+   EXPO_PUBLIC_API_URL=https://sua-api.dominio.com/api
+   ```
+
+   Troque pela URL pública de verdade do serviço da API (seção 2). Se depois
+   mudar essa URL, precisa fazer um novo deploy (rebuild), não só reiniciar
+   o container.
+
+4. Ative um **domínio** para esse serviço (ex.: `app.suabarbearia.com`) —
+   esse é o link que você manda pros clientes com iPhone.
+5. Faça o deploy.
+
+Essa versão web é só um paliativo: reaproveita o mesmo código do app mobile
+(mesmas telas de cliente, mesma API), então qualquer melhoria feita numa
+também pode valer pra outra — mas WebView nativa (mapa, formulário de
+cartão, desafio 3DS) foi trocada por equivalentes de navegador
+(`WebViewCompat`/`DeviceIdCollector`, ver `apps/mobile/src/components/`), e
+o app Android **não muda em nada** por causa disso (ver comentário no topo
+de cada um desses arquivos).

@@ -1,9 +1,9 @@
 import React, { useMemo } from "react";
 import { StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView, WebViewMessageEvent } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { BarbeariaProxima } from "@barbearia-saas/shared";
+import { WebViewCompat } from "../../components/WebViewCompat";
 import { colors } from "../../theme/tokens";
 import { abrirNoMapa } from "../../utils/maps";
 import { HomeStackParamList } from "../../navigation/HomeStack";
@@ -53,7 +53,16 @@ function montarHtml(barbearias: BarbeariaProxima[], minhaLat: number, minhaLng: 
   L.marker([${minhaLat}, ${minhaLng}], { icon: iconeCliente }).addTo(mapa).bindPopup('Você está aqui');
 
   function enviar(msg) {
-    window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+    // No app nativo essa página roda dentro de uma WebView de verdade (tem
+    // window.ReactNativeWebView); no Expo Web (ver WebViewCompat.web.tsx)
+    // ela roda num <iframe> comum, então usa window.parent.postMessage — o
+    // mesmo HTML serve pros dois sem nenhuma outra mudança.
+    var texto = JSON.stringify(msg);
+    if (window.ReactNativeWebView) {
+      window.ReactNativeWebView.postMessage(texto);
+    } else {
+      window.parent.postMessage(texto, '*');
+    }
   }
 
   pins.forEach(function (b) {
@@ -84,10 +93,10 @@ export function MapScreen({ route, navigation }: Props) {
   const { barbearias, minhaLat, minhaLng } = route.params;
   const html = useMemo(() => montarHtml(barbearias, minhaLat, minhaLng), [barbearias, minhaLat, minhaLng]);
 
-  function receberMensagem(evento: WebViewMessageEvent) {
+  function receberMensagem(dados: string) {
     let msg: MensagemDoMapa;
     try {
-      msg = JSON.parse(evento.nativeEvent.data);
+      msg = JSON.parse(dados);
     } catch {
       return;
     }
@@ -103,13 +112,7 @@ export function MapScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={["bottom"]}>
-      <WebView
-        source={{ html }}
-        originWhitelist={["*"]}
-        style={styles.webview}
-        onMessage={receberMensagem}
-        javaScriptEnabled
-      />
+      <WebViewCompat source={{ html }} style={styles.webview} onMessage={receberMensagem} />
     </SafeAreaView>
   );
 }

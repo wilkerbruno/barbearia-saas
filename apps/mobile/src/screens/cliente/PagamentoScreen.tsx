@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
 import * as Clipboard from "expo-clipboard";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { centavosParaReais, MetodoPagamento, Pagamento, StatusPagamento } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { WebViewCompat } from "../../components/WebViewCompat";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 
@@ -174,7 +174,7 @@ export function PagamentoScreen({ route, navigation }: Props) {
               concluir o pagamento:
             </Text>
             <Card style={styles.webviewCard}>
-              <WebView source={{ uri: pagamento.desafio3dsUrl }} style={styles.webview} startInLoadingState />
+              <WebViewCompat source={{ uri: pagamento.desafio3dsUrl }} style={styles.webview} startInLoadingState />
             </Card>
             <View style={styles.aguardando}>
               <ActivityIndicator color={colors.accent} size="small" />

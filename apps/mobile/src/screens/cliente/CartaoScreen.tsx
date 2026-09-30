@@ -1,17 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { WebView } from "react-native-webview";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { AgendamentoLoteCriado, BarbeariaPublica, CartaoSalvo, centavosParaReais, identificarBandeiraLocal } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { DeviceIdCollector } from "../../components/DeviceIdCollector";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { HomeStackParamList } from "../../navigation/HomeStack";
 import {
-  HTML_DEVICE_ID,
   corBandeira,
   formatarCpf,
   formatarNumeroCartao,
@@ -90,6 +89,14 @@ export function CartaoScreen({ route, navigation }: Props) {
   // valor atual e continuar.
   const deviceIdRef = useRef<string | null>(null);
   const deviceIdResolvidoRef = useRef(false);
+  // useCallback (deps vazias) pra ficar estável entre renders — o
+  // DeviceIdCollector.web.tsx reinicia o polling do zero toda vez que essa
+  // função muda de referência, e essa tela re-renderiza a cada tecla digitada
+  // no formulário.
+  const aoReceberDeviceId = useCallback((id: string | null) => {
+    deviceIdRef.current = id;
+    deviceIdResolvidoRef.current = true;
+  }, []);
 
   // Bandeira reconhecida AO VIVO, direto dos dígitos já digitados — sem
   // nenhuma chamada de rede (ver identificarBandeiraLocal no pacote
@@ -329,23 +336,10 @@ export function CartaoScreen({ route, navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      {/* Invisível de propósito — só existe pra rodar o security.js do
-          Mercado Pago em segundo plano (ver HTML_DEVICE_ID acima). */}
-      <View style={styles.webviewOculta} pointerEvents="none">
-        <WebView
-          source={{ html: HTML_DEVICE_ID }}
-          onMessage={(evento) => {
-            // evento.nativeEvent.data vem "" quando a WebView desistiu sem
-            // conseguir capturar (ver HTML_DEVICE_ID) — nesse caso o ref fica
-            // null mesmo, mas deviceIdResolvidoRef marca que a espera em
-            // aguardarDeviceId() acima pode parar (não tem mais nada a
-            // esperar, mesmo sem sucesso).
-            deviceIdRef.current = evento.nativeEvent.data || null;
-            deviceIdResolvidoRef.current = true;
-          }}
-          javaScriptEnabled
-        />
-      </View>
+      {/* Coleta o Device ID antifraude do Mercado Pago em segundo plano — ver
+          DeviceIdCollector (WebView oculta no nativo, injeção direta de
+          script no Expo Web). */}
+      <DeviceIdCollector onDeviceId={aoReceberDeviceId} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -525,7 +519,6 @@ export function CartaoScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  webviewOculta: { position: "absolute", width: 1, height: 1, opacity: 0 },
   content: { padding: spacing.xl, gap: spacing.md, paddingBottom: spacing.xxl },
   sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.inkMuted, textTransform: "uppercase", marginTop: spacing.md },
   label: { fontSize: 12, color: colors.inkMuted },

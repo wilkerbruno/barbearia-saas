@@ -11,11 +11,22 @@ import { Linking, Platform } from "react-native";
 export function abrirNoMapa(barbearia: { nome: string; latitude?: number | null; longitude?: number | null }): void {
   if (barbearia.latitude == null || barbearia.longitude == null) return;
   const label = encodeURIComponent(barbearia.nome);
+  const urlGoogleMapsWeb = `https://www.google.com/maps/search/?api=1&query=${barbearia.latitude},${barbearia.longitude}`;
+
+  // No navegador (Expo Web) não existem os esquemas "geo:"/"maps:" — vai
+  // direto pro Google Maps, numa aba nova (mesmo comportamento do fallback
+  // abaixo, só que sem depender de uma Promise rejeitada pra chegar lá, que
+  // no react-native-web pode nem rejeitar do jeito esperado).
+  if (Platform.OS === "web") {
+    Linking.openURL(urlGoogleMapsWeb);
+    return;
+  }
+
   const url =
     Platform.OS === "ios"
       ? `maps:0,0?q=${label}@${barbearia.latitude},${barbearia.longitude}`
       : `geo:${barbearia.latitude},${barbearia.longitude}?q=${barbearia.latitude},${barbearia.longitude}(${label})`;
   Linking.openURL(url).catch(() => {
-    Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${barbearia.latitude},${barbearia.longitude}`);
+    Linking.openURL(urlGoogleMapsWeb);
   });
 }

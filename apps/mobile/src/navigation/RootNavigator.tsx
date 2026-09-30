@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, Platform, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { Papel, StatusAssinatura } from "@barbearia-saas/shared";
 import { useAuthStore } from "../store/authStore";
@@ -53,6 +53,11 @@ export function RootNavigator() {
   // simulador, ou EAS ainda não configurado, devolvendo null nesses casos.
   useEffect(() => {
     if (usuario?.papel !== Papel.BARBEARIA_ADMIN && usuario?.papel !== Papel.FUNCIONARIO) return;
+    // Na versão web essas contas nem chegam a ver BarbeariaTabs/FuncionarioTabs
+    // (ver `equipeNaWeb` abaixo) — não faz sentido pedir permissão de
+    // notificação do navegador pra uma conta que só vai ver a tela de "acesse
+    // pelo app".
+    if (Platform.OS === "web") return;
     registrarPushToken()
       .then((token) => {
         if (token) api.patch("/usuarios/meu-push-token", { pushToken: token }).catch(() => {});
@@ -73,20 +78,42 @@ export function RootNavigator() {
   // nenhum jeito de voltar pro login a não ser reinstalando o app.
   const papelSemSuporteMobile = usuario && !PAPEIS_COM_STACK_MOBILE.includes(usuario.papel as any);
 
+  // A versão WEB (Expo Web, ver package.json/app.json) só foi adaptada pro
+  // fluxo do CLIENTE (agendar/pagar) — dono e funcionário continuam usando o
+  // app Android normalmente. As telas do painel da barbearia (BarbeariaTabs/
+  // FuncionarioTabs) dependem de coisas nunca testadas nem ajustadas pra
+  // navegador (seletor de foto do logo, WebView de assinatura antes da
+  // AssinaturaBloqueadaStack etc.), então em vez de arriscar mostrar algo
+  // quebrado pra quem entrar com essas contas pelo navegador, mostra o mesmo
+  // aviso de "acesse pelo app" usado pro SAAS_ADMIN.
+  const equipeNaWeb =
+    Platform.OS === "web" && (usuario?.papel === Papel.FUNCIONARIO || usuario?.papel === Papel.BARBEARIA_ADMIN);
+
   // O pop-up de "assinatura vencendo em breve" só faz sentido enquanto a
   // equipe ainda está com acesso normal (assinaturaBloqueada=false) — uma vez
-  // bloqueada, a tela cheia de bloqueio (acima) já cobre o aviso.
+  // bloqueada, a tela cheia de bloqueio (acima) já cobre o aviso. Também não
+  // faz sentido em `equipeNaWeb` (acima), que nem chega a mostrar as abas.
   const mostrarPopupVencimento =
-    !assinaturaBloqueada && (usuario?.papel === Papel.FUNCIONARIO || usuario?.papel === Papel.BARBEARIA_ADMIN);
+    !assinaturaBloqueada &&
+    !equipeNaWeb &&
+    (usuario?.papel === Papel.FUNCIONARIO || usuario?.papel === Papel.BARBEARIA_ADMIN);
 
   return (
     <NavigationContainer ref={navigationRef}>
       {!usuario && <AuthNavigator />}
       {papelSemSuporteMobile && <AcessoNaoSuportadoScreen onSair={logout} />}
+      {equipeNaWeb && (
+        <AcessoNaoSuportadoScreen
+          onSair={logout}
+          titulo="Acesse pelo aplicativo do celular"
+          mensagem="A versão web ainda só atende clientes agendando horário. Contas de dono e funcionário devem usar o aplicativo Android por enquanto."
+        />
+      )}
       {usuario?.papel === Papel.CLIENTE && <ClienteTabs />}
-      {usuario?.papel === Papel.FUNCIONARIO &&
+      {!equipeNaWeb && usuario?.papel === Papel.FUNCIONARIO &&
         (assinaturaBloqueada ? <FuncionarioAssinaturaBloqueadaScreen onSair={logout} /> : <FuncionarioTabs />)}
-      {usuario?.papel === Papel.BARBEARIA_ADMIN && (assinaturaBloqueada ? <AssinaturaBloqueadaStack /> : <BarbeariaTabs />)}
+      {!equipeNaWeb && usuario?.papel === Papel.BARBEARIA_ADMIN &&
+        (assinaturaBloqueada ? <AssinaturaBloqueadaStack /> : <BarbeariaTabs />)}
       {mostrarPopupVencimento && <PopupVencimentoAssinatura podeRenovar={usuario?.papel === Papel.BARBEARIA_ADMIN} />}
     </NavigationContainer>
   );
