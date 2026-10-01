@@ -161,7 +161,14 @@ export class WebhooksService {
     const novoStatus = mapearStatusPagamento(pagamentoMp.status);
     await this.prisma.pagamento.update({
       where: { id: pagamentoId },
-      data: { status: novoStatus, gatewayPagamentoId: paymentId },
+      data: {
+        status: novoStatus,
+        gatewayPagamentoId: paymentId,
+        // Só o Mercado Pago sabe a taxa real depois de processar — grava
+        // sempre que vier (fica 0 enquanto ainda não aprovou). Usado pelo
+        // Financeiro pra mostrar o valor líquido (ver FinanceiroService).
+        taxaMercadoPagoCentavos: pagamentoMp.taxaCentavos,
+      },
     });
 
     if (novoStatus === StatusPagamento.APROVADO && pagamento.grupoId) {

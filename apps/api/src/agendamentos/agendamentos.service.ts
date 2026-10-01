@@ -463,6 +463,12 @@ export class AgendamentosService {
     // Só usa grupoId quando há mais de um serviço (agrupa pra
     // cancelar/concluir juntos) — um item só nem precisa.
     const grupoId = resolvidos.length > 1 ? randomUUID() : undefined;
+    // Como a barbearia recebeu por fora (sem Pagamento, não passa pelo
+    // Mercado Pago) — ver Agendamento.metodoPagamentoManual no schema e
+    // FinanceiroService, que usa isso pros cards de Pix/Cartão/Dinheiro.
+    // Default Dinheiro: é o caso mais comum de lançamento manual (cliente que
+    // pagou na hora, na mão).
+    const metodoPagamentoManual = dto.metodoPagamento ?? MetodoPagamento.DINHEIRO;
     let cursor = inicio;
     const dadosParaCriar = resolvidos.map((item) => {
       const inicioItem = cursor;
@@ -481,6 +487,7 @@ export class AgendamentosService {
         precoCentavos: item.precoCentavos,
         status: StatusAgendamento.CONFIRMADO,
         origem: OrigemAgendamento.BARBEARIA_MANUAL,
+        metodoPagamentoManual,
         grupoId,
       };
     });
@@ -551,7 +558,14 @@ export class AgendamentosService {
       where: { id: pagamentoId },
       // `?? null`: PaymentDetalhe.desafio3dsUrl vem undefined pro Pix (não
       // existe conceito de 3DS lá) — sem isso o Prisma reclamaria do tipo.
-      data: { status: novoStatus, desafio3dsUrl: pagamentoMp.desafio3dsUrl ?? null },
+      data: {
+        status: novoStatus,
+        desafio3dsUrl: pagamentoMp.desafio3dsUrl ?? null,
+        // Mesma taxa do Mercado Pago gravada no webhook (ver
+        // WebhooksService.tratarPagamentoAgendamento) — esse poll é só o
+        // outro caminho que pode ser o primeiro a ver a aprovação.
+        taxaMercadoPagoCentavos: pagamentoMp.taxaCentavos,
+      },
     });
     if (novoStatus === StatusPagamento.APROVADO && atualizado.grupoId) {
       await this.prisma.agendamento.updateMany({

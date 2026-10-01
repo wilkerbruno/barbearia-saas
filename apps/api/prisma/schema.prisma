@@ -42,6 +42,10 @@ enum OrigemAgendamento {
 enum MetodoPagamento {
   PIX
   CARTAO
+  // Pago por fora, na mão/maquininha da própria barbearia — só existe em
+  // Agendamento.metodoPagamentoManual (lançamento manual), nunca em Pagamento
+  // (que representa sempre uma cobrança de verdade pelo Mercado Pago).
+  DINHEIRO
 }
 
 // Espelha (de forma simplificada) o status de pagamento do Mercado Pago.
@@ -426,6 +430,15 @@ model Agendamento {
   // Contabilizado pelo Financeiro junto com os CONCLUIDO.
   valorMultaCentavos Int?
 
+  // Só preenchido quando origem = BARBEARIA_MANUAL: como a barbearia recebeu
+  // por fora (dinheiro na mão, Pix fora do app, cartão na maquininha própria)
+  // — não existe Pagamento aqui porque não passou pelo Mercado Pago da
+  // integração. É o que o FinanceiroService usa pra separar os 3 cards
+  // (Pix/Cartão/Dinheiro) junto com o metodo do Pagamento real dos
+  // agendamentos vindos do app (origem = CLIENTE_APP). Default DINHEIRO pra
+  // não deixar nulo um lançamento manual (ver AgendamentosService.criarManual).
+  metodoPagamentoManual MetodoPagamento?
+
   @@index([barbeariaId, inicio])
   @@index([funcionarioId, inicio])
   @@index([clienteId])
@@ -467,6 +480,11 @@ model Pagamento {
   // — só fica preenchida enquanto o pagamento está PENDENTE aguardando o
   // titular confirmar com o próprio banco; o app abre isso numa WebView.
   desafio3dsUrl String? @db.Text
+  // Taxa que o próprio Mercado Pago descontou dessa cobrança (fee_details da
+  // Payment/Order API) — a barbearia recebe o valorCentavos menos isso. Fica
+  // 0 enquanto ainda não aprovou (só vem preenchido num pagamento já
+  // processado). Ver MercadoPagoService.buscarPayment/buscarOrderComoPayment.
+  taxaMercadoPagoCentavos Int @default(0)
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
 

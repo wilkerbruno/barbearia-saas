@@ -39,6 +39,11 @@ export interface PaymentDetalhe {
   // enquanto a Order está "action_required"/"pending_challenge"; some de
   // novo (null) assim que o comprador conclui ou o desafio expira.
   desafio3dsUrl?: string | null;
+  // Taxa que o Mercado Pago descontou dessa cobrança (soma de fee_details) —
+  // só vem diferente de zero depois que o pagamento processa de verdade;
+  // antes disso o próprio Mercado Pago ainda não calculou. Ver
+  // extrairTaxaCentavos abaixo.
+  taxaCentavos: number;
 }
 
 export interface PixCriado {
@@ -758,6 +763,18 @@ export class MercadoPagoService {
     return id.startsWith("ORD");
   }
 
+  // Soma o campo "amount" de cada entrada de um array fee_details do Mercado
+  // Pago (ex: [{ type: "mercadopago_fee", amount: 1.5, fee_payer: "collector" }])
+  // e devolve em centavos — é a taxa que a própria plataforma do Mercado Pago
+  // descontou da cobrança, antes de repassar o resto pra conta da barbearia.
+  // Blindado contra formato inesperado/ausente (devolve 0) pra nunca derrubar
+  // o polling nem o webhook por causa disso.
+  private extrairTaxaCentavos(feeDetails: any): number {
+    if (!Array.isArray(feeDetails)) return 0;
+    const totalReais = feeDetails.reduce((soma: number, item: any) => soma + (Number(item?.amount) || 0), 0);
+    return Math.round(totalReais * 100);
+  }
+
   async buscarPayment(id: string, accessTokenOverride?: string): Promise<PaymentDetalhe> {
     if (this.ehIdDeOrder(id)) return this.buscarOrderComoPayment(id, accessTokenOverride);
     const corpo: any = await this.chamar(`/v1/payments/${id}`, undefined, accessTokenOverride);
@@ -769,6 +786,7 @@ export class MercadoPagoService {
       metodoPagamento: corpo.payment_method_id ?? null,
       dataAprovacao: corpo.date_approved ?? null,
       dataCriacao: corpo.date_created,
+      taxaCentavos: this.extrairTaxaCentavos(corpo.fee_details),
     };
   }
 
@@ -797,6 +815,13 @@ export class MercadoPagoService {
       dataAprovacao: status === "approved" ? (corpo.last_updated_date ?? null) : null,
       dataCriacao: corpo.created_date,
       desafio3dsUrl,
+      // A Orders API (cartão) não documenta fee_details no mesmo lugar da API
+      // clássica de payments — tenta no mesmo formato dentro da transação (se
+      // o Mercado Pago vier a espelhar lá) e cai pra 0 se não existir, em vez
+      // de quebrar. Pix (o grosso dos pagamentos) usa buscarPayment acima,
+      // que lê fee_details de verdade; vale conferir com uma cobrança real no
+      // cartão se esse valor aparece diferente de zero depois de aprovar.
+      taxaCentavos: this.extrairTaxaCentavos(transacao?.fee_details ?? corpo.fee_details),
     };
   }
 

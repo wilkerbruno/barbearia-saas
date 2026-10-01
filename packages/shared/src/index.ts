@@ -308,6 +308,9 @@ export interface CriarAgendamentoManualInput {
   clienteId?: string; // cliente já cadastrado no app
   clienteAvulsoNome?: string; // OU nome/telefone de alguém sem conta
   clienteAvulsoTelefone?: string;
+  // Como a barbearia recebeu por fora (dinheiro, Pix fora do app, cartão na
+  // maquininha própria) — omitido = Dinheiro. Ver Agendamento.metodoPagamentoManual.
+  metodoPagamento?: MetodoPagamento;
 }
 
 // ============================= PAGAMENTOS DO CLIENTE =============================
@@ -315,6 +318,9 @@ export interface CriarAgendamentoManualInput {
 export const MetodoPagamento = {
   PIX: "PIX",
   CARTAO: "CARTAO",
+  // Só usado em lançamento manual (ver CriarAgendamentoManualInput) — nunca
+  // num Pagamento de verdade (que sempre veio do Mercado Pago).
+  DINHEIRO: "DINHEIRO",
 } as const;
 export type MetodoPagamento = (typeof MetodoPagamento)[keyof typeof MetodoPagamento];
 

@@ -5,7 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar } from "react-native-calendars";
 import { Ionicons } from "@expo/vector-icons";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { centavosParaReais, FuncionarioDetalhado, Pacote, Papel, Servico } from "@barbearia-saas/shared";
+import { centavosParaReais, FuncionarioDetalhado, MetodoPagamento, Pacote, Papel, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
@@ -18,6 +18,12 @@ type Props = NativeStackScreenProps<AgendaStackParamList, "AgendarManual">;
 const HOJE = new Date();
 const HOJE_ISO = formatarDataLocal(HOJE);
 const LIMITE_DIAS_FUTUROS = 60;
+
+const FORMAS_PAGAMENTO: Array<{ valor: MetodoPagamento; label: string }> = [
+  { valor: MetodoPagamento.DINHEIRO, label: "Dinheiro" },
+  { valor: MetodoPagamento.PIX, label: "Pix" },
+  { valor: MetodoPagamento.CARTAO, label: "Cartão" },
+];
 
 function duracaoDoPacote(pacote: Pacote): number {
   return pacote.servicos.reduce((total, ps) => total + ps.servico.duracaoMinutos, 0) || 30;
@@ -50,6 +56,11 @@ export function AgendarManualScreen({ navigation }: Props) {
 
   const [clienteNome, setClienteNome] = useState("");
   const [clienteTelefone, setClienteTelefone] = useState("");
+  // Como a barbearia recebeu por fora (não passa pelo Mercado Pago da
+  // integração) — alimenta os cards de Pix/Cartão/Dinheiro no Financeiro (ver
+  // AgendamentosService.criarManual e FinanceiroService). Dinheiro é o mais
+  // comum nesse fluxo, por isso o default.
+  const [metodoPagamento, setMetodoPagamento] = useState<MetodoPagamento>(MetodoPagamento.DINHEIRO);
   const [enviando, setEnviando] = useState(false);
 
   // Quem sou eu pra lançar: funcionário lança na própria agenda; dono escolhe
@@ -167,6 +178,7 @@ export function AgendarManualScreen({ navigation }: Props) {
         itens,
         clienteAvulsoNome: clienteNome.trim(),
         clienteAvulsoTelefone: clienteTelefone.trim() || undefined,
+        metodoPagamento,
       });
       alertar("Agendamento lançado!", "Já aparece na agenda.");
       navigation.goBack();
@@ -334,6 +346,21 @@ export function AgendarManualScreen({ navigation }: Props) {
                 style={styles.input}
               />
             </Card>
+
+            <Text style={styles.sectionTitle}>Forma de pagamento</Text>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}>
+              {FORMAS_PAGAMENTO.map((forma) => {
+                const selecionado = forma.valor === metodoPagamento;
+                return (
+                  <Pressable key={forma.valor} onPress={() => setMetodoPagamento(forma.valor)}>
+                    <View style={[styles.horarioChip, selecionado && styles.horarioChipSelecionado]}>
+                      <Text style={[styles.horarioTexto, selecionado && styles.horarioTextoSelecionado]}>{forma.label}</Text>
+                    </View>
+                  </Pressable>
+                );
+              })}
+            </View>
+
             <Button label="Lançar agendamento" onPress={confirmar} loading={enviando} />
           </>
         )}

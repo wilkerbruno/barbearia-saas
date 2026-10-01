@@ -1,8 +1,19 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { StatusAgendamento } from "@barbearia-saas/shared";
+import { MetodoPagamento, OrigemAgendamento, StatusAgendamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 
 type Periodo = "hoje" | "semana" | "mes";
+
+interface ResumoPorMetodo {
+  atendimentos: number;
+  brutoCentavos: number;
+  taxasCentavos: number;
+  liquidoCentavos: number;
+}
+
+function metodoVazio(): ResumoPorMetodo {
+  return { atendimentos: 0, brutoCentavos: 0, taxasCentavos: 0, liquidoCentavos: 0 };
+}
 
 function intervaloPara(periodo: Periodo): { inicio: Date; fim: Date } {
   const agora = new Date();
@@ -58,7 +69,8 @@ export class FinanceiroService {
   }
 
   // Resumo consolidado da barbearia inteira (app do dono), com detalhamento por
-  // funcionário e por serviço/pacote (pra saber o que realmente traz receita).
+  // funcionário, por serviço/pacote e por forma de pagamento (pra saber o que
+  // realmente traz receita, e quanto disso o Mercado Pago já descontou).
   // porFuncionario/porServico contam só atendimentos concluídos de verdade;
   // a multa de não comparecimento entra separada, no total (ver multasCentavos).
   async resumoBarbearia(barbeariaId: string, periodo: Periodo) {
@@ -99,19 +111,81 @@ export class FinanceiroService {
     }
     const porServico = Array.from(porServicoMap.values()).sort((a, b) => b.faturamentoCentavos - a.faturamentoCentavos);
 
+    // Detalhamento por forma de pagamento: pra um agendamento lançado
+    // manualmente (origem BARBEARIA_MANUAL), o método já vem no próprio
+    // Agendamento (metodoPagamentoManual — não existe Pagamento, foi recebido
+    // por fora). Pra um agendamento vindo do app (origem CLIENTE_APP), o
+    // método e a taxa descontada pelo Mercado Pago vêm do Pagamento ligado
+    // pelo grupoId (ver schema.prisma) — busca todos de uma vez e soma a taxa
+    // de cada Pagamento só uma vez (um grupo pode ter vários agendamentos
+    // concluídos cobrados juntos por um único Pagamento). Agendamentos usando
+    // cota de pacote mensal (assinaturaPacoteId) não entram aqui: não têm
+    // Pagamento nem foram recebidos por fora, são receita de assinatura à parte.
+    const gruposClienteApp = Array.from(
+      new Set(
+        agendamentos
+          .filter((a) => a.origem === OrigemAgendamento.CLIENTE_APP && a.grupoId)
+          .map((a) => a.grupoId as string),
+      ),
+    );
+    const pagamentos = gruposClienteApp.length
+      ? await this.prisma.pagamento.findMany({ where: { grupoId: { in: gruposClienteApp } } })
+      : [];
+    const pagamentoPorGrupo = new Map(pagamentos.map((p) => [p.grupoId as string, p]));
+
+    const porMetodo: Record<MetodoPagamento, ResumoPorMetodo> = {
+      PIX: metodoVazio(),
+      CARTAO: metodoVazio(),
+      DINHEIRO: metodoVazio(),
+    };
+    const gruposComTaxaContada = new Set<string>();
+    for (const a of agendamentos) {
+      let metodo: MetodoPagamento | null = null;
+      let taxaDesseItemCentavos = 0;
+      if (a.origem === OrigemAgendamento.BARBEARIA_MANUAL) {
+        metodo = (a.metodoPagamentoManual as MetodoPagamento | null) ?? MetodoPagamento.DINHEIRO;
+      } else if (a.grupoId) {
+        const pagamento = pagamentoPorGrupo.get(a.grupoId);
+        if (pagamento) {
+          metodo = pagamento.metodo as MetodoPagamento;
+          if (!gruposComTaxaContada.has(a.grupoId)) {
+            taxaDesseItemCentavos = pagamento.taxaMercadoPagoCentavos;
+            gruposComTaxaContada.add(a.grupoId);
+          }
+        }
+      }
+      if (!metodo || !porMetodo[metodo]) continue; // pacote mensal ou sem Pagamento identificável
+      const bucket = porMetodo[metodo];
+      bucket.atendimentos += 1;
+      bucket.brutoCentavos += a.precoCentavos;
+      bucket.taxasCentavos += taxaDesseItemCentavos;
+    }
+    for (const metodo of Object.keys(porMetodo) as MetodoPagamento[]) {
+      porMetodo[metodo].liquidoCentavos = porMetodo[metodo].brutoCentavos - porMetodo[metodo].taxasCentavos;
+    }
+    const taxasMercadoPagoCentavos = Object.values(porMetodo).reduce((soma, m) => soma + m.taxasCentavos, 0);
+
     const faturamentoConcluidosCentavos = porFuncionario.reduce((soma, f) => soma + f.faturamentoCentavos, 0);
     const comissoesCentavos = porFuncionario.reduce((soma, f) => soma + f.comissaoCentavos, 0);
+    // Bruto, igual sempre foi (mantido pra quem já lê esse campo há mais tempo).
     const faturamentoCentavos = faturamentoConcluidosCentavos + multasCentavos;
+    // O que a barbearia de fato recebe, já descontada a taxa que o Mercado
+    // Pago fica com uma parte (pedido explícito do dono) — é esse valor que
+    // entra no lucro.
+    const faturamentoLiquidoCentavos = faturamentoCentavos - taxasMercadoPagoCentavos;
 
     return {
       periodo,
       atendimentos: agendamentos.length,
       faturamentoCentavos,
+      faturamentoLiquidoCentavos,
+      taxasMercadoPagoCentavos,
       multasCentavos,
       comissoesCentavos,
-      lucroCentavos: faturamentoCentavos - comissoesCentavos,
+      lucroCentavos: faturamentoLiquidoCentavos - comissoesCentavos,
       porFuncionario,
       porServico,
+      porMetodo,
     };
   }
 }

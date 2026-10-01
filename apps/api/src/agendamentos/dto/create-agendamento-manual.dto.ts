@@ -1,5 +1,6 @@
 import { Type } from "class-transformer";
-import { ArrayMinSize, IsArray, IsDateString, IsOptional, IsString, ValidateIf, ValidateNested } from "class-validator";
+import { ArrayMinSize, IsArray, IsDateString, IsEnum, IsOptional, IsString, ValidateIf, ValidateNested } from "class-validator";
+import { MetodoPagamento } from "@barbearia-saas/shared";
 
 class ItemAgendamentoManualDto {
   @ValidateIf((dto) => !dto.pacoteId)
@@ -40,4 +41,12 @@ export class CreateAgendamentoManualDto {
   @IsOptional()
   @IsString()
   clienteAvulsoTelefone?: string;
+
+  // Como a barbearia recebeu por fora (dinheiro na mão, Pix fora do app,
+  // cartão na própria maquininha) — não passa pelo Mercado Pago da
+  // integração, só fica registrado pro Financeiro separar os 3 cards
+  // (Pix/Cartão/Dinheiro). Omitido = Dinheiro (ver AgendamentosService.criarManual).
+  @IsOptional()
+  @IsEnum(MetodoPagamento)
+  metodoPagamento?: MetodoPagamento;
 }

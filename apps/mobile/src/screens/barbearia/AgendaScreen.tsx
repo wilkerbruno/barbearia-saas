@@ -61,6 +61,15 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
     carregar();
   }
 
+  // Faltava essa ação aqui (só existia na agenda do funcionário) — sem ela,
+  // um agendamento visto só por aqui nunca virava CONCLUIDO, e por isso nunca
+  // contava no financeiro da barbearia (ver FinanceiroService), mesmo tendo
+  // sido atendido de verdade.
+  async function concluir(id: string) {
+    await api.patch(`/agendamentos/${id}/concluir`);
+    carregar();
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
@@ -121,9 +130,14 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <PriceTag centavos={item.precoCentavos} />
               {item.status === StatusAgendamento.CONFIRMADO && (
-                <Text style={styles.naoCompareceu} onPress={() => marcarNaoCompareceu(item.id)}>
-                  Não compareceu
-                </Text>
+                <View style={{ flexDirection: "row", gap: spacing.md }}>
+                  <Text style={styles.naoCompareceu} onPress={() => marcarNaoCompareceu(item.id)}>
+                    Não compareceu
+                  </Text>
+                  <Text style={styles.concluir} onPress={() => concluir(item.id)}>
+                    Marcar concluído
+                  </Text>
+                </View>
               )}
             </View>
           </Card>
@@ -171,5 +185,6 @@ const styles = StyleSheet.create({
   time: { fontWeight: "800", color: colors.ink },
   meta: { fontSize: 12, color: colors.inkMuted },
   naoCompareceu: { color: colors.danger, fontWeight: "700", fontSize: 12 },
+  concluir: { color: colors.accent, fontWeight: "700", fontSize: 12 },
   pacoteMensal: { fontSize: 11, fontWeight: "700", color: colors.accent },
 });
