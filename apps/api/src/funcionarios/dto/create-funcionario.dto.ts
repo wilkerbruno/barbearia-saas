@@ -13,6 +13,17 @@ export class CreateFuncionarioDto {
   @MinLength(6)
   senha: string;
 
+  // Opcional (diferente do telefone de cliente/dono, que é obrigatório no
+  // próprio autocadastro) — quem está preenchendo aqui é o dono, cadastrando
+  // em nome de outra pessoa, então não trava a criação se ele não tiver a
+  // mão o número do funcionário ainda. Só o dono tem acesso a esse campo (ver
+  // FuncionariosService.listarDaBarbearia e UsuariosService.atualizarMeuPerfil,
+  // que recusa o próprio funcionário tentando editar o telefone dele).
+  @IsOptional()
+  @IsString()
+  @MinLength(8)
+  telefone?: string;
+
   @IsOptional()
   @IsString()
   cargo?: string;

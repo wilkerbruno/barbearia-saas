@@ -8,9 +8,10 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://banco-de-dados-barbearia.lcgx8u.easypanel.host/api",
+        "EXPO_PUBLIC_API_URL": "https://api.barberone.store/api",
         "EXPO_PUBLIC_BARBEARIA_ID": "f6b3670a-4054-44e5-800c-f743e0742bd6"
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
@@ -18,15 +19,17 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://banco-de-dados-barbearia.lcgx8u.easypanel.host/api",
+        "EXPO_PUBLIC_API_URL": "https://api.barberone.store/api",
         "EXPO_PUBLIC_BARBEARIA_ID": "f6b3670a-4054-44e5-800c-f743e0742bd6"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://banco-de-dados-barbearia.lcgx8u.easypanel.host/api",
+        "EXPO_PUBLIC_API_URL": "https://api.barberone.store/api",
         "EXPO_PUBLIC_BARBEARIA_ID": "f6b3670a-4054-44e5-800c-f743e0742bd6"
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {

@@ -15,7 +15,7 @@ import { MaisStackParamList } from "../../navigation/MaisStack";
 
 type Props = NativeStackScreenProps<MaisStackParamList, "Equipe">;
 
-const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", cargo: "", comissaoPercentual: "60" };
+const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", telefone: "", cargo: "", comissaoPercentual: "60" };
 
 interface Assinatura {
   plano: { nome: string; limiteFuncionarios: number | null };
@@ -32,6 +32,12 @@ export function EquipeScreen({ navigation }: Props) {
   const [formAberto, setFormAberto] = useState(false);
   const [campos, setCampos] = useState(FUNCIONARIO_VAZIO);
   const [salvando, setSalvando] = useState(false);
+  // Edição do telefone de um funcionário já cadastrado — só o dono tem acesso
+  // a esse campo (ver UsuariosService.atualizarMeuPerfil, que recusa o
+  // próprio funcionário tentando mudar o seu).
+  const [editandoTelefoneId, setEditandoTelefoneId] = useState<string | null>(null);
+  const [telefoneEditado, setTelefoneEditado] = useState("");
+  const [salvandoTelefone, setSalvandoTelefone] = useState(false);
 
   const carregar = useCallback(async () => {
     const [funcionariosRes, assinaturaRes] = await Promise.all([
@@ -66,7 +72,12 @@ export function EquipeScreen({ navigation }: Props) {
       return alertar("Comissão inválida", "Digite um valor entre 0 e 100.");
     }
 
-    const dto = { nome, email, senha, cargo: campos.cargo.trim() || undefined, comissaoPercentual };
+    const telefone = campos.telefone.trim() || undefined;
+    if (telefone && telefone.replace(/\D/g, "").length < 8) {
+      return alertar("Telefone inválido", "Digite um telefone válido com DDD, ou deixe em branco.");
+    }
+
+    const dto = { nome, email, senha, telefone, cargo: campos.cargo.trim() || undefined, comissaoPercentual };
     setSalvando(true);
     try {
       await api.post("/funcionarios", dto);
@@ -85,6 +96,28 @@ export function EquipeScreen({ navigation }: Props) {
       carregar();
     } catch (e: any) {
       alertar("Não foi possível atualizar", e?.response?.data?.message ?? "Tente de novo.");
+    }
+  }
+
+  function iniciarEdicaoTelefone(funcionario: FuncionarioDetalhado) {
+    setEditandoTelefoneId(funcionario.id);
+    setTelefoneEditado(funcionario.usuario.telefone ?? "");
+  }
+
+  async function salvarTelefone(id: string) {
+    const telefone = telefoneEditado.trim();
+    if (telefone && telefone.replace(/\D/g, "").length < 8) {
+      return alertar("Telefone inválido", "Digite um telefone válido com DDD.");
+    }
+    setSalvandoTelefone(true);
+    try {
+      await api.patch(`/funcionarios/${id}`, { telefone: telefone || undefined });
+      setEditandoTelefoneId(null);
+      carregar();
+    } catch (e: any) {
+      alertar("Não foi possível salvar", e?.response?.data?.message ?? "Tente de novo.");
+    } finally {
+      setSalvandoTelefone(false);
     }
   }
 
@@ -135,6 +168,14 @@ export function EquipeScreen({ navigation }: Props) {
                 placeholderTextColor={colors.inkMuted}
                 style={styles.input}
               />
+              <TextInput
+                value={campos.telefone}
+                onChangeText={(telefone) => setCampos((c) => ({ ...c, telefone }))}
+                placeholder="Telefone (opcional — só você tem acesso)"
+                placeholderTextColor={colors.inkMuted}
+                keyboardType="phone-pad"
+                style={styles.input}
+              />
               <View style={{ flexDirection: "row", gap: spacing.sm }}>
                 <TextInput
                   value={campos.cargo}
@@ -178,6 +219,32 @@ export function EquipeScreen({ navigation }: Props) {
                 {!item.disponivel && <Text style={styles.meta}>Indisponível para novos agendamentos</Text>}
               </View>
             </View>
+
+            {editandoTelefoneId === item.id ? (
+              <View style={{ gap: spacing.xs }}>
+                <TextInput
+                  value={telefoneEditado}
+                  onChangeText={setTelefoneEditado}
+                  placeholder="Telefone"
+                  placeholderTextColor={colors.inkMuted}
+                  keyboardType="phone-pad"
+                  style={styles.input}
+                />
+                <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                  <View style={{ flex: 1 }}>
+                    <Button label="Cancelar" variant="secondary" onPress={() => setEditandoTelefoneId(null)} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Button label="Salvar" onPress={() => salvarTelefone(item.id)} loading={salvandoTelefone} />
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.meta}>
+                {item.usuario.telefone ? `Telefone: ${item.usuario.telefone}` : "Telefone não cadastrado"}
+              </Text>
+            )}
+
             <View style={{ flexDirection: "row", gap: spacing.lg }}>
               <Text
                 style={styles.acaoPrimaria}
@@ -185,6 +252,11 @@ export function EquipeScreen({ navigation }: Props) {
               >
                 Horários e folgas
               </Text>
+              {editandoTelefoneId !== item.id && (
+                <Text style={styles.acaoSecundaria} onPress={() => iniciarEdicaoTelefone(item)}>
+                  Editar telefone
+                </Text>
+              )}
               <Text style={styles.acaoSecundaria} onPress={() => alternarAtivo(item)}>
                 {item.ativo ? "Desativar" : "Ativar"}
               </Text>

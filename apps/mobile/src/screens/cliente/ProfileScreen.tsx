@@ -24,6 +24,9 @@ export function ProfileScreen({ navigation }: Props) {
             <Text style={styles.email}>{usuario?.email}</Text>
           </View>
           <Card style={{ padding: 0, overflow: "hidden" }}>
+            <Text style={[styles.item, styles.itemComBorda]} onPress={() => navigation.navigate("EditarPerfil")}>
+              Editar perfil
+            </Text>
             <Text style={[styles.item, styles.itemComBorda]} onPress={() => navigation.navigate("MeusPacotes")}>
               Meus pacotes mensais
             </Text>

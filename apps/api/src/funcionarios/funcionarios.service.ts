@@ -16,7 +16,9 @@ export class FuncionariosService {
   listarDaBarbearia(barbeariaId: string) {
     return this.prisma.funcionario.findMany({
       where: { barbeariaId },
-      include: { usuario: { select: { id: true, nome: true, email: true } } },
+      // telefone: só o dono vê (é quem chama este método) — ver comentário em
+      // FuncionarioDetalhado (packages/shared) e UsuariosService.atualizarMeuPerfil.
+      include: { usuario: { select: { id: true, nome: true, email: true, telefone: true } } },
       orderBy: { usuario: { nome: "asc" } },
     });
   }
@@ -38,6 +40,7 @@ export class FuncionariosService {
           nome: dto.nome,
           email: dto.email,
           senhaHash,
+          telefone: dto.telefone,
           papel: Papel.FUNCIONARIO,
           barbeariaId,
         },
@@ -50,7 +53,7 @@ export class FuncionariosService {
           cargo: dto.cargo ?? "Barbeiro",
           comissaoPercentual: dto.comissaoPercentual ?? 60,
         },
-        include: { usuario: { select: { id: true, nome: true, email: true } } },
+        include: { usuario: { select: { id: true, nome: true, email: true, telefone: true } } },
       });
     });
   }
@@ -67,10 +70,20 @@ export class FuncionariosService {
       }
     }
 
-    return this.prisma.funcionario.update({
-      where: { id },
-      data: dto,
-      include: { usuario: { select: { id: true, nome: true, email: true } } },
+    // telefone mora em Usuario, o resto (cargo/comissão/ativo/disponível) mora
+    // em Funcionario — separa antes de gravar, cada um na sua tabela.
+    const { telefone, ...dadosFuncionario } = dto;
+
+    return this.prisma.$transaction(async (tx) => {
+      if (telefone !== undefined) {
+        const funcionario = await tx.funcionario.findUniqueOrThrow({ where: { id } });
+        await tx.usuario.update({ where: { id: funcionario.usuarioId }, data: { telefone } });
+      }
+      return tx.funcionario.update({
+        where: { id },
+        data: dadosFuncionario,
+        include: { usuario: { select: { id: true, nome: true, email: true, telefone: true } } },
+      });
     });
   }
 

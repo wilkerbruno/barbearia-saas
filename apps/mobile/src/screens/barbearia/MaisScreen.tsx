@@ -13,6 +13,7 @@ export function MaisScreen({ navigation }: Props) {
   const logout = useAuthStore((s) => s.logout);
 
   const itens: Array<{ label: string; onPress: () => void }> = [
+    { label: "Editar perfil", onPress: () => navigation.navigate("EditarPerfil") },
     { label: "Serviços", onPress: () => navigation.navigate("Servicos") },
     { label: "Pacotes", onPress: () => navigation.navigate("Pacotes") },
     { label: "Pacotes mensais", onPress: () => navigation.navigate("PacotesMensais") },

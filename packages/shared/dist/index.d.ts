@@ -73,6 +73,7 @@ export interface FuncionarioDetalhado {
         id: string;
         nome: string;
         email: string;
+        telefone?: string | null;
     };
 }
 export interface HorarioTrabalho {

@@ -18,11 +18,15 @@ interface AuthState {
   restaurarSessao: () => Promise<void>;
   logout: () => void;
   setAssinaturaBloqueada: (bloqueada: boolean) => void;
+  // Mescla campos novos no usuário logado (ex: depois de editar o perfil em
+  // PATCH /usuarios/me) sem precisar deslogar/logar de novo — mantém o token
+  // e o resto do estado como estão.
+  atualizarUsuario: (dados: Partial<Usuario>) => Promise<void>;
 }
 
 // Estado global de autenticação. A tela raiz (RootNavigator) decide qual
 // conjunto de telas mostrar com base em `usuario.papel`.
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   token: null,
   usuario: null,
   carregando: true,
@@ -54,4 +58,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   setAssinaturaBloqueada: (assinaturaBloqueada) => set({ assinaturaBloqueada }),
+
+  atualizarUsuario: async (dados) => {
+    const atual = get().usuario;
+    if (!atual) return;
+    const atualizado = { ...atual, ...dados };
+    await secureStorage.setItem(USER_KEY, JSON.stringify(atualizado));
+    set({ usuario: atualizado });
+  },
 }));

@@ -1,6 +1,7 @@
 import { Body, Controller, Patch } from "@nestjs/common";
 import { UsuariosService } from "./usuarios.service";
 import { SalvarPushTokenDto } from "./dto/salvar-push-token.dto";
+import { UpdateMeuPerfilDto } from "./dto/update-meu-perfil.dto";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { AuthUser } from "../auth/jwt.strategy";
 
@@ -14,5 +15,13 @@ export class UsuariosController {
   @Patch("meu-push-token")
   salvarPushToken(@Body() dto: SalvarPushTokenDto, @CurrentUser() user: AuthUser) {
     return this.usuariosService.salvarPushToken(user.id, dto.pushToken);
+  }
+
+  // Tela "Perfil" — sem @Roles: qualquer papel logado (cliente, funcionário,
+  // dono) edita os próprios dados básicos. Regras de quem pode mexer em quê
+  // (ex: telefone de FUNCIONARIO) ficam no service.
+  @Patch("meu-perfil")
+  atualizarMeuPerfil(@Body() dto: UpdateMeuPerfilDto, @CurrentUser() user: AuthUser) {
+    return this.usuariosService.atualizarMeuPerfil(user.id, user.papel, dto);
   }
 }

@@ -126,7 +126,10 @@ export interface FuncionarioDetalhado {
   comissaoPercentual: number;
   ativo: boolean;
   disponivel: boolean;
-  usuario: { id: string; nome: string; email: string };
+  // telefone: só a barbearia (dono) tem acesso — ver FuncionariosService e a
+  // tela Equipe, que é a única que edita/mostra esse campo. O próprio
+  // funcionário não vê o telefone dele aqui (ver FuncionarioPerfilScreen).
+  usuario: { id: string; nome: string; email: string; telefone?: string | null };
 }
 
 // Horário de trabalho de um dia da semana (diaSemana: 0=domingo ... 6=sábado,

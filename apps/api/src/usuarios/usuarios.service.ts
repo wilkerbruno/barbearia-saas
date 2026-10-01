@@ -1,5 +1,12 @@
-import { Injectable } from "@nestjs/common";
+import { ConflictException, ForbiddenException, Injectable } from "@nestjs/common";
+import { Papel } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
+import { UpdateMeuPerfilDto } from "./dto/update-meu-perfil.dto";
+
+// Campos devolvidos depois de editar o perfil — mesmo formato do Usuario
+// "seguro" (sem senhaHash) usado em AuthService.login/registerCliente, pra o
+// app poder atualizar o authStore direto com a resposta.
+const SELECT_SEGURO = { id: true, nome: true, email: true, telefone: true, papel: true, barbeariaId: true, criadoEm: true };
 
 @Injectable()
 export class UsuariosService {
@@ -10,5 +17,28 @@ export class UsuariosService {
   async salvarPushToken(usuarioId: string, pushToken: string) {
     await this.prisma.usuario.update({ where: { id: usuarioId }, data: { pushToken } });
     return { ok: true };
+  }
+
+  // Tela "Perfil" (cliente, funcionário e dono) — cada um edita os próprios
+  // dados básicos. O telefone do FUNCIONARIO é exclusivo da barbearia (ver
+  // FuncionariosService.atualizar): recusa aqui em vez de simplesmente
+  // ignorar, pra o app mostrar um erro claro em vez de parecer que salvou.
+  async atualizarMeuPerfil(usuarioId: string, papel: Papel, dto: UpdateMeuPerfilDto) {
+    if (dto.telefone !== undefined && papel === Papel.FUNCIONARIO) {
+      throw new ForbiddenException("Seu telefone é cadastrado e só pode ser alterado pela barbearia.");
+    }
+
+    if (dto.email) {
+      const existente = await this.prisma.usuario.findUnique({ where: { email: dto.email } });
+      if (existente && existente.id !== usuarioId) {
+        throw new ConflictException("Já existe uma conta com este e-mail.");
+      }
+    }
+
+    return this.prisma.usuario.update({
+      where: { id: usuarioId },
+      data: { nome: dto.nome, email: dto.email, telefone: dto.telefone },
+      select: SELECT_SEGURO,
+    });
   }
 }
