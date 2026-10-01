@@ -6,6 +6,7 @@ import { api } from "../../lib/api";
 interface ConfiguracaoPlataforma {
   diasTesteGratis: number;
   horasCarenciaAposVencimento: number;
+  emailSuporte: string | null;
 }
 
 // Parâmetros globais do SaaS: quantos dias de teste grátis toda barbearia nova
@@ -16,6 +17,7 @@ interface ConfiguracaoPlataforma {
 export default function ConfiguracoesPage() {
   const [diasTesteGratis, setDiasTesteGratis] = useState("");
   const [horasCarencia, setHorasCarencia] = useState("");
+  const [emailSuporte, setEmailSuporte] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
@@ -25,6 +27,7 @@ export default function ConfiguracoesPage() {
     api.get<ConfiguracaoPlataforma>("/configuracoes").then((res) => {
       setDiasTesteGratis(String(res.data.diasTesteGratis));
       setHorasCarencia(String(res.data.horasCarenciaAposVencimento));
+      setEmailSuporte(res.data.emailSuporte ?? "");
       setCarregando(false);
     });
   }, []);
@@ -38,10 +41,17 @@ export default function ConfiguracoesPage() {
     const horas = parseInt(horasCarencia, 10);
     if (Number.isNaN(dias) || dias < 0) return setErro("Informe um número de dias válido (0 ou mais).");
     if (Number.isNaN(horas) || horas < 0) return setErro("Informe um número de horas válido (0 ou mais).");
+    // eslint-disable-next-line no-useless-escape
+    const emailValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailSuporte.trim());
+    if (!emailValido) return setErro("Informe um e-mail de suporte válido.");
 
     setSalvando(true);
     try {
-      await api.patch("/configuracoes", { diasTesteGratis: dias, horasCarenciaAposVencimento: horas });
+      await api.patch("/configuracoes", {
+        diasTesteGratis: dias,
+        horasCarenciaAposVencimento: horas,
+        emailSuporte: emailSuporte.trim(),
+      });
       setSalvo(true);
     } catch (err: any) {
       setErro(err?.response?.data?.message ?? "Não foi possível salvar.");
@@ -89,6 +99,22 @@ export default function ConfiguracoesPage() {
             Quando a assinatura de uma barbearia vence (trial ou mensalidade), a equipe dela (funcionários e dono) é
             bloqueada na hora. O cliente final continua vendo e conseguindo agendar por esse tanto de horas — depois
             disso, a barbearia some da busca do cliente também.
+          </p>
+        </div>
+
+        <div>
+          <label style={labelStyle}>E-mail de suporte</label>
+          <input
+            type="email"
+            placeholder="suporte@divisionstech.com.br"
+            value={emailSuporte}
+            onChange={(e) => setEmailSuporte(e.target.value)}
+            style={{ ...inputStyle, width: "100%" }}
+          />
+          <p style={hintStyle}>
+            Exibido na tela "Suporte" do app, pra cliente, funcionário e dono de barbearia entrarem em contato. O
+            WhatsApp de atendimento prioritário (quando o plano da barbearia tiver essa opção) é configurado em
+            Planos.
           </p>
         </div>
 

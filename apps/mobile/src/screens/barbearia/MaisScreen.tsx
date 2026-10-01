@@ -21,6 +21,7 @@ export function MaisScreen({ navigation }: Props) {
     { label: "Logo da barbearia", onPress: () => navigation.navigate("Logo") },
     { label: "Mercado Pago", onPress: () => navigation.navigate("MercadoPago") },
     { label: "Assinatura do plano", onPress: () => navigation.navigate("Assinatura") },
+    { label: "Suporte", onPress: () => navigation.navigate("Suporte") },
   ];
 
   return (

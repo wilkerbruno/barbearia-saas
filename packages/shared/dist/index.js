@@ -48,6 +48,9 @@ exports.AVISO_NAO_COMPARECIMENTO = "Política de cancelamento: em caso de não c
 exports.MetodoPagamento = {
     PIX: "PIX",
     CARTAO: "CARTAO",
+    // Só usado em lançamento manual (ver CriarAgendamentoManualInput) — nunca
+    // num Pagamento de verdade (que sempre veio do Mercado Pago).
+    DINHEIRO: "DINHEIRO",
 };
 exports.StatusPagamento = {
     PENDENTE: "PENDENTE",

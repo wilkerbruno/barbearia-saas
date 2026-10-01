@@ -601,6 +601,14 @@ model Plano {
   descontoAnualTipo  TipoDesconto @default(PERCENTUAL)
   descontoAnualValor Int          @default(0)
 
+  // Atendimento prioritário: quando true, a tela "Suporte" do dono/equipe
+  // dessa barbearia (mobile) mostra o WhatsApp abaixo, além do e-mail de
+  // suporte padrão (que é global, ver ConfiguracaoPlataforma.emailSuporte).
+  // Validado no ConfiguracoesService.obterSuporte — só devolve o WhatsApp se
+  // o plano ATUAL da barbearia tiver essa flag ligada.
+  atendimentoPrioritario Boolean @default(false)
+  whatsappSuporte        String?
+
   assinaturas Assinatura[]
   pagamentosAssinatura PagamentoAssinatura[]
 }
@@ -661,6 +669,9 @@ model ConfiguracaoPlataforma {
   id                          String   @id @default("default")
   diasTesteGratis             Int      @default(14)
   horasCarenciaAposVencimento Int      @default(24)
+  // E-mail de contato exibido na tela "Suporte" do app (cliente, funcionário
+  // e dono da barbearia) — ver ConfiguracoesController.obterSuporte.
+  emailSuporte                String?
   atualizadoEm                DateTime @updatedAt
 }
 

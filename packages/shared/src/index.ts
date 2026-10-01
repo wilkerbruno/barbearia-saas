@@ -246,7 +246,7 @@ export interface Agendamento {
   // Só vem populado em "meus agendamentos" (o cliente pode agendar em várias
   // barbearias, diferente da agenda do funcionário/dono, que já sabe qual é
   // a própria barbearia) — usado pra mostrar o nome e o botão "Como chegar".
-  barbearia?: { id: string; nome: string; endereco?: string | null; latitude?: number | null; longitude?: number | null } | null;
+  barbearia?: { id: string; nome: string; endereco?: string | null; latitude?: number | null; longitude?: number | null; telefone?: string | null } | null;
 }
 
 // Retorno de POST /agendamentos/lote (e POST /agendamentos, que por baixo faz
@@ -456,6 +456,10 @@ export interface Plano {
   // Desconto do plano ANUAL — ver calcularPrecoAnualCentavos abaixo.
   descontoAnualTipo: TipoDesconto;
   descontoAnualValor: number;
+  // Atendimento prioritário — libera o WhatsApp na tela "Suporte" do app pra
+  // quem está numa barbearia nesse plano (ver ConfiguracoesService.obterSuporte).
+  atendimentoPrioritario: boolean;
+  whatsappSuporte?: string | null;
 }
 
 // Preço do plano anual (12x o mensal, com o desconto configurado pelo

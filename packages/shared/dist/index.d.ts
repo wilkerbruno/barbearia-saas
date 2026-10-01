@@ -164,6 +164,7 @@ export interface Agendamento {
         endereco?: string | null;
         latitude?: number | null;
         longitude?: number | null;
+        telefone?: string | null;
     } | null;
 }
 export interface AgendamentoLoteCriado {
@@ -193,10 +194,12 @@ export interface CriarAgendamentoManualInput {
     clienteId?: string;
     clienteAvulsoNome?: string;
     clienteAvulsoTelefone?: string;
+    metodoPagamento?: MetodoPagamento;
 }
 export declare const MetodoPagamento: {
     readonly PIX: "PIX";
     readonly CARTAO: "CARTAO";
+    readonly DINHEIRO: "DINHEIRO";
 };
 export type MetodoPagamento = (typeof MetodoPagamento)[keyof typeof MetodoPagamento];
 export declare const StatusPagamento: {
@@ -297,6 +300,8 @@ export interface Plano {
     ativo: boolean;
     descontoAnualTipo: TipoDesconto;
     descontoAnualValor: number;
+    atendimentoPrioritario: boolean;
+    whatsappSuporte?: string | null;
 }
 export declare function calcularPrecoAnualCentavos(precoMensalCentavos: number, tipo: TipoDesconto, valor: number): number;
 export declare const StatusAssinatura: {

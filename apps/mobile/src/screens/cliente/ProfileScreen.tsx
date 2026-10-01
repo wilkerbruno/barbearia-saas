@@ -24,8 +24,11 @@ export function ProfileScreen({ navigation }: Props) {
             <Text style={styles.email}>{usuario?.email}</Text>
           </View>
           <Card style={{ padding: 0, overflow: "hidden" }}>
-            <Text style={styles.item} onPress={() => navigation.navigate("MeusPacotes")}>
+            <Text style={[styles.item, styles.itemComBorda]} onPress={() => navigation.navigate("MeusPacotes")}>
               Meus pacotes mensais
+            </Text>
+            <Text style={styles.item} onPress={() => navigation.navigate("Suporte")}>
+              Suporte
             </Text>
           </Card>
         </View>
@@ -42,4 +45,5 @@ const styles = StyleSheet.create({
   name: { fontSize: 16, fontWeight: "700", color: colors.ink },
   email: { fontSize: 13, color: colors.inkMuted, marginTop: 2 },
   item: { padding: spacing.lg, fontSize: 14, fontWeight: "600", color: colors.ink },
+  itemComBorda: { borderBottomWidth: 1, borderBottomColor: colors.border },
 });

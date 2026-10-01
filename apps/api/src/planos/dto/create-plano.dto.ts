@@ -1,4 +1,4 @@
-import { IsArray, IsIn, IsInt, IsOptional, IsPositive, IsString, Min } from "class-validator";
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsPositive, IsString, Min, MinLength, ValidateIf } from "class-validator";
 import { TipoDesconto } from "@barbearia-saas/shared";
 
 export class CreatePlanoDto {
@@ -30,4 +30,17 @@ export class CreatePlanoDto {
   @IsInt()
   @Min(0)
   descontoAnualValor?: number;
+
+  // Atendimento prioritário: libera o WhatsApp abaixo na tela "Suporte" do
+  // app (cliente, funcionário e dono) pra quem está numa barbearia nesse
+  // plano. Quando marcado, o WhatsApp é obrigatório (ver ValidateIf abaixo) —
+  // não faz sentido oferecer o recurso sem o número pra chamar.
+  @IsOptional()
+  @IsBoolean()
+  atendimentoPrioritario?: boolean;
+
+  @ValidateIf((o) => o.atendimentoPrioritario === true)
+  @IsString()
+  @MinLength(8)
+  whatsappSuporte?: string;
 }

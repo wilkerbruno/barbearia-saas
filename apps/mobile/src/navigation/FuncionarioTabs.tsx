@@ -4,7 +4,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { FuncionarioAgendaStackNavigator } from "./AgendaStack";
 import { FuncionarioFinanceiroScreen } from "../screens/funcionario/FinanceiroScreen";
 import { FuncionarioHorariosScreen } from "../screens/funcionario/HorariosScreen";
-import { FuncionarioPerfilScreen } from "../screens/funcionario/PerfilScreen";
+import { FuncionarioPerfilStackNavigator } from "./FuncionarioPerfilStack";
 import { tabBarScreenOptions } from "./tabBarOptions";
 
 const Tab = createBottomTabNavigator();
@@ -30,7 +30,7 @@ export function FuncionarioTabs() {
       />
       <Tab.Screen
         name="Perfil"
-        component={FuncionarioPerfilScreen}
+        component={FuncionarioPerfilStackNavigator}
         options={{ tabBarIcon: ({ color, size, focused }) => <Ionicons name={focused ? "person" : "person-outline"} size={size} color={color} /> }}
       />
     </Tab.Navigator>

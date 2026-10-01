@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, Min } from "class-validator";
+import { IsEmail, IsInt, IsOptional, Min } from "class-validator";
 
 export class UpdateConfiguracaoDto {
   @IsOptional()
@@ -10,4 +10,10 @@ export class UpdateConfiguracaoDto {
   @IsInt()
   @Min(0)
   horasCarenciaAposVencimento?: number;
+
+  // E-mail exibido na tela "Suporte" do app (cliente, funcionário e dono) —
+  // ver ConfiguracoesController.obterSuporte.
+  @IsOptional()
+  @IsEmail()
+  emailSuporte?: string;
 }

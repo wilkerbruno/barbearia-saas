@@ -11,15 +11,20 @@ export function RegistrarClienteScreen() {
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [telefone, setTelefone] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const entrar = useAuthStore((s) => s.entrar);
 
   async function handleRegistrar() {
     setErro(null);
+    if (telefone.replace(/\D/g, "").length < 8) {
+      setErro("Informe um telefone válido com DDD.");
+      return;
+    }
     setCarregando(true);
     try {
-      const { data } = await api.post("/auth/registrar-cliente", { nome, email, senha });
+      const { data } = await api.post("/auth/registrar-cliente", { nome, email, senha, telefone });
       await entrar(data.accessToken, data.usuario);
     } catch (e: any) {
       setErro(e?.response?.data?.message ?? "Não foi possível criar a conta.");
@@ -61,6 +66,16 @@ export function RegistrarClienteScreen() {
           <View style={styles.field}>
             <Text style={styles.label}>Senha</Text>
             <PasswordInput value={senha} onChangeText={setSenha} style={styles.input} placeholder="Mínimo 6 caracteres" />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Telefone</Text>
+            <TextInput
+              value={telefone}
+              onChangeText={setTelefone}
+              keyboardType="phone-pad"
+              style={styles.input}
+              placeholder="(11) 91234-5678"
+            />
           </View>
 
           {erro && <Text style={styles.erro}>{erro}</Text>}

@@ -286,7 +286,10 @@ export class AgendamentosService {
     const [agendamentos, pagamentoFinal] = await Promise.all([
       this.prisma.agendamento.findMany({
         where: { grupoId },
-        include: { servico: true, pacote: true, funcionario: { include: { usuario: true } } },
+        // select em vez de include: true — mesmo motivo das outras consultas
+        // de agenda: evita devolver o Usuario inteiro (hash de senha) do
+        // funcionário pro app do cliente que acabou de agendar.
+        include: { servico: true, pacote: true, funcionario: { include: { usuario: { select: { id: true, nome: true } } } } },
         orderBy: { inicio: "asc" },
       }),
       this.prisma.pagamento.findUniqueOrThrow({ where: { id: pagamento.id } }),
@@ -412,7 +415,8 @@ export class AgendamentosService {
     await this.prisma.$transaction(dadosParaCriar.map((data) => this.prisma.agendamento.create({ data })));
     const agendamentos = await this.prisma.agendamento.findMany({
       where: { grupoId },
-      include: { servico: true, pacote: true, funcionario: { include: { usuario: true } } },
+      // select em vez de include: true — mesmo motivo das demais consultas.
+      include: { servico: true, pacote: true, funcionario: { include: { usuario: { select: { id: true, nome: true } } } } },
       orderBy: { inicio: "asc" },
     });
 
@@ -495,7 +499,14 @@ export class AgendamentosService {
     const criados = await this.prisma.$transaction(dadosParaCriar.map((data) => this.prisma.agendamento.create({ data })));
     return this.prisma.agendamento.findMany({
       where: { id: { in: criados.map((c) => c.id) } },
-      include: { servico: true, pacote: true, funcionario: { include: { usuario: true } }, cliente: true },
+      // select em vez de include: true — mesmo motivo das demais consultas
+      // de agenda (evita devolver hash de senha/e-mail desnecessariamente).
+      include: {
+        servico: true,
+        pacote: true,
+        funcionario: { include: { usuario: { select: { id: true, nome: true } } } },
+        cliente: { select: { id: true, nome: true, telefone: true } },
+      },
       orderBy: { inicio: "asc" },
     });
   }
@@ -692,11 +703,15 @@ export class AgendamentosService {
       include: {
         servico: true,
         pacote: true,
-        funcionario: { include: { usuario: true } },
+        // `select` em vez de `include: true` — isso devolvia o Usuario inteiro
+        // do funcionário (hash de senha incluído) pro app do cliente, sem
+        // necessidade nenhuma de expor isso.
+        funcionario: { include: { usuario: { select: { id: true, nome: true } } } },
         // O cliente pode ter agendamentos em várias barbearias diferentes —
         // sem isso, "Meus agendamentos" não tinha como mostrar em qual
-        // barbearia foi cada um nem oferecer o botão "Como chegar".
-        barbearia: { select: { id: true, nome: true, endereco: true, latitude: true, longitude: true } },
+        // barbearia foi cada um nem oferecer o botão "Como chegar". telefone:
+        // é o que alimenta o botão "Ligar para a barbearia".
+        barbearia: { select: { id: true, nome: true, endereco: true, telefone: true, latitude: true, longitude: true } },
       },
       orderBy: { inicio: "desc" },
     });
@@ -714,7 +729,10 @@ export class AgendamentosService {
         status: { not: StatusAgendamento.CANCELADO },
         ...(dataInicio && dataFim ? { inicio: { gte: dataInicio, lt: dataFim } } : {}),
       },
-      include: { servico: true, pacote: true, cliente: true },
+      // `select` em vez de `include: true` — evita devolver o Usuario inteiro
+      // do cliente (hash de senha incluído) pra agenda do funcionário.
+      // telefone: alimenta o botão "Ligar para o cliente".
+      include: { servico: true, pacote: true, cliente: { select: { id: true, nome: true, telefone: true } } },
       orderBy: { inicio: "asc" },
     });
   }
@@ -728,7 +746,15 @@ export class AgendamentosService {
         ...(funcionarioId ? { funcionarioId } : {}),
         ...(dataInicio && dataFim ? { inicio: { gte: dataInicio, lt: dataFim } } : {}),
       },
-      include: { servico: true, pacote: true, cliente: true, funcionario: { include: { usuario: true } } },
+      // Mesma correção acima (select em vez de include: true) pros dois
+      // relacionamentos de Usuario — nenhum precisa do registro inteiro
+      // (hash de senha, e-mail) só pra mostrar nome/telefone na agenda.
+      include: {
+        servico: true,
+        pacote: true,
+        cliente: { select: { id: true, nome: true, telefone: true } },
+        funcionario: { include: { usuario: { select: { id: true, nome: true } } } },
+      },
       orderBy: { inicio: "asc" },
     });
   }

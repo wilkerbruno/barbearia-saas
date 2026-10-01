@@ -4,7 +4,7 @@ import { PrismaService } from "../prisma/prisma.service";
 
 type Periodo = "hoje" | "semana" | "mes";
 
-interface ResumoPorMetodo {
+export interface ResumoPorMetodo {
   atendimentos: number;
   brutoCentavos: number;
   taxasCentavos: number;

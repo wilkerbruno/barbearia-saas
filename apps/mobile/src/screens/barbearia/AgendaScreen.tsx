@@ -11,6 +11,7 @@ import { PriceTag } from "../../components/PriceTag";
 import { StatusBadge } from "../../components/StatusBadge";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { AgendaStackParamList } from "../../navigation/AgendaStack";
+import { ligarPara } from "../../utils/telefone";
 
 type Props = NativeStackScreenProps<AgendaStackParamList, "Agenda">;
 
@@ -123,9 +124,20 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
               <StatusBadge status={item.status} />
             </View>
             <Text style={styles.meta}>{item.servico?.nome ?? item.pacote?.nome ?? "Serviço"}</Text>
-            <Text style={styles.meta}>
-              {item.cliente?.nome ?? item.clienteAvulsoNome ?? "Cliente"} · {item.funcionario?.usuario?.nome}
-            </Text>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <Text style={styles.meta}>
+                {item.cliente?.nome ?? item.clienteAvulsoNome ?? "Cliente"} · {item.funcionario?.usuario?.nome}
+              </Text>
+              {(item.cliente?.telefone ?? item.clienteAvulsoTelefone) && (
+                <Pressable
+                  style={styles.ligarCliente}
+                  onPress={() => ligarPara(item.cliente?.telefone ?? item.clienteAvulsoTelefone)}
+                >
+                  <Ionicons name="call" size={13} color={colors.accent} />
+                  <Text style={styles.ligarClienteTexto}>Ligar</Text>
+                </Pressable>
+              )}
+            </View>
             {item.assinaturaPacoteId ? <Text style={styles.pacoteMensal}>Pacote mensal</Text> : null}
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <PriceTag centavos={item.precoCentavos} />
@@ -187,4 +199,6 @@ const styles = StyleSheet.create({
   naoCompareceu: { color: colors.danger, fontWeight: "700", fontSize: 12 },
   concluir: { color: colors.accent, fontWeight: "700", fontSize: 12 },
   pacoteMensal: { fontSize: 11, fontWeight: "700", color: colors.accent },
+  ligarCliente: { flexDirection: "row", alignItems: "center", gap: 4 },
+  ligarClienteTexto: { fontSize: 12, fontWeight: "700", color: colors.accent },
 });

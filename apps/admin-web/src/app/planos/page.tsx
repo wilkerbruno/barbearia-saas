@@ -11,6 +11,8 @@ const NOVO_PLANO_VAZIO = {
   recursos: "",
   descontoAnualTipo: TipoDesconto.PERCENTUAL as TipoDesconto,
   descontoAnualValor: "",
+  atendimentoPrioritario: false,
+  whatsappSuporte: "",
 };
 
 // Onde o SaaS "faz os valores": cria planos novos, edita o preço de um plano
@@ -25,6 +27,12 @@ export default function PlanosPage() {
   const [editandoDescontoId, setEditandoDescontoId] = useState<string | null>(null);
   const [descontoTipo, setDescontoTipo] = useState<TipoDesconto>(TipoDesconto.PERCENTUAL);
   const [descontoValor, setDescontoValor] = useState("");
+  // Edição do atendimento prioritário (WhatsApp) — mesmo padrão do desconto
+  // anual acima: estado próprio porque é editado independentemente do resto.
+  const [editandoSuporteId, setEditandoSuporteId] = useState<string | null>(null);
+  const [suportePrioritario, setSuportePrioritario] = useState(false);
+  const [suporteWhatsapp, setSuporteWhatsapp] = useState("");
+  const [erroSuporte, setErroSuporte] = useState<string | null>(null);
   const [formAberto, setFormAberto] = useState(false);
   const [novoPlano, setNovoPlano] = useState(NOVO_PLANO_VAZIO);
   const [salvando, setSalvando] = useState(false);
@@ -78,6 +86,35 @@ export default function PlanosPage() {
     carregar();
   }
 
+  function iniciarEdicaoSuporte(plano: Plano) {
+    setEditandoSuporteId(plano.id);
+    setSuportePrioritario(plano.atendimentoPrioritario);
+    setSuporteWhatsapp(plano.whatsappSuporte ?? "");
+    setErroSuporte(null);
+  }
+
+  // Validado tanto aqui (feedback imediato) quanto no backend (fonte da
+  // verdade — ver CreatePlanoDto.whatsappSuporte): não dá pra ligar o
+  // atendimento prioritário sem informar o WhatsApp.
+  async function salvarSuporte(id: string) {
+    setErroSuporte(null);
+    const whatsappLimpo = suporteWhatsapp.replace(/\D/g, "");
+    if (suportePrioritario && whatsappLimpo.length < 8) {
+      setErroSuporte("Informe um WhatsApp válido com DDI e DDD (ex: 5531999999999).");
+      return;
+    }
+    try {
+      await api.patch(`/planos/${id}`, {
+        atendimentoPrioritario: suportePrioritario,
+        whatsappSuporte: suportePrioritario ? suporteWhatsapp.trim() : undefined,
+      });
+      setEditandoSuporteId(null);
+      carregar();
+    } catch (err: any) {
+      setErroSuporte(err?.response?.data?.message ?? "Não foi possível salvar.");
+    }
+  }
+
   async function criarPlano(e: React.FormEvent) {
     e.preventDefault();
     setErro(null);
@@ -86,6 +123,9 @@ export default function PlanosPage() {
     if (Number.isNaN(precoCentavos) || precoCentavos <= 0) return setErro("Digite um preço válido (ex: 79,00).");
     const descontoBruto = novoPlano.descontoAnualValor.trim() ? parseFloat(novoPlano.descontoAnualValor.replace(",", ".")) : 0;
     if (Number.isNaN(descontoBruto) || descontoBruto < 0) return setErro("Digite um desconto anual válido (ou deixe em branco).");
+    if (novoPlano.atendimentoPrioritario && novoPlano.whatsappSuporte.replace(/\D/g, "").length < 8) {
+      return setErro("Informe um WhatsApp válido com DDI e DDD (ex: 5531999999999) para o atendimento prioritário.");
+    }
 
     setSalvando(true);
     try {
@@ -99,6 +139,8 @@ export default function PlanosPage() {
           .filter(Boolean),
         descontoAnualTipo: novoPlano.descontoAnualTipo,
         descontoAnualValor: novoPlano.descontoAnualTipo === TipoDesconto.PERCENTUAL ? Math.round(descontoBruto) : Math.round(descontoBruto * 100),
+        atendimentoPrioritario: novoPlano.atendimentoPrioritario,
+        whatsappSuporte: novoPlano.atendimentoPrioritario ? novoPlano.whatsappSuporte.trim() : undefined,
       });
       setNovoPlano(NOVO_PLANO_VAZIO);
       setFormAberto(false);
@@ -170,6 +212,25 @@ export default function PlanosPage() {
               style={{ ...inputStyle, flex: 1 }}
             />
           </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4, borderTop: "1px solid #F1EEE9" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={novoPlano.atendimentoPrioritario}
+                onChange={(e) => setNovoPlano((p) => ({ ...p, atendimentoPrioritario: e.target.checked }))}
+              />
+              Atendimento prioritário (libera WhatsApp de suporte pra esse plano)
+            </label>
+            {novoPlano.atendimentoPrioritario && (
+              <input
+                placeholder="WhatsApp com DDI e DDD (ex: 5531999999999)"
+                value={novoPlano.whatsappSuporte}
+                onChange={(e) => setNovoPlano((p) => ({ ...p, whatsappSuporte: e.target.value }))}
+                style={inputStyle}
+              />
+            )}
+          </div>
+
           {novoPlano.precoReais && !Number.isNaN(parseFloat(novoPlano.precoReais.replace(",", "."))) && (
             <div style={{ fontSize: 12, color: "#837A73" }}>
               Preço anual resultante:{" "}
@@ -267,6 +328,45 @@ export default function PlanosPage() {
                   </div>
                   <button onClick={() => iniciarEdicaoDesconto(plano)} style={{ ...btnSecondary, width: "100%", marginTop: 8 }}>
                     Editar desconto anual
+                  </button>
+                </>
+              )}
+            </div>
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #F1EEE9" }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#837A73", textTransform: "uppercase" }}>
+                Suporte prioritário
+              </div>
+              {editandoSuporteId === plano.id ? (
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                  {erroSuporte && <div style={{ color: "#C1442E", fontSize: 12 }}>{erroSuporte}</div>}
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={suportePrioritario}
+                      onChange={(e) => setSuportePrioritario(e.target.checked)}
+                    />
+                    Tem WhatsApp de atendimento prioritário
+                  </label>
+                  {suportePrioritario && (
+                    <input
+                      placeholder="WhatsApp com DDI e DDD (ex: 5531999999999)"
+                      value={suporteWhatsapp}
+                      onChange={(e) => setSuporteWhatsapp(e.target.value)}
+                      style={inputStyle}
+                    />
+                  )}
+                  <button onClick={() => salvarSuporte(plano.id)} style={btnPrimary}>
+                    Salvar suporte
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginTop: 4 }}>
+                    {plano.atendimentoPrioritario ? `WhatsApp: ${plano.whatsappSuporte}` : "Somente e-mail (padrão)"}
+                  </div>
+                  <button onClick={() => iniciarEdicaoSuporte(plano)} style={{ ...btnSecondary, width: "100%", marginTop: 8 }}>
+                    Editar suporte prioritário
                   </button>
                 </>
               )}

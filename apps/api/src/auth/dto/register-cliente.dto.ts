@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsString, MinLength } from "class-validator";
 
 // Cadastro de um cliente final (quem agenda horário no app).
 export class RegisterClienteDto {
@@ -12,7 +12,9 @@ export class RegisterClienteDto {
   @MinLength(6)
   senha: string;
 
-  @IsOptional()
+  // Obrigatório: é o número que a barbearia usa pra ligar em caso de
+  // imprevisto (ver botão "Ligar para o cliente" na agenda — AgendaScreen).
   @IsString()
-  telefone?: string;
+  @MinLength(8)
+  telefone: string;
 }

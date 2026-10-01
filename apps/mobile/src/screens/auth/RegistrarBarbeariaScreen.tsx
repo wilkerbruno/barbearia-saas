@@ -20,6 +20,7 @@ export function RegistrarBarbeariaScreen() {
   const [nomeDono, setNomeDono] = useState("");
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
+  const [telefone, setTelefone] = useState("");
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [planoId, setPlanoId] = useState<string | null>(null);
   const [logo, setLogo] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -78,6 +79,10 @@ export function RegistrarBarbeariaScreen() {
       setErro("Escolha um plano para continuar.");
       return;
     }
+    if (telefone.replace(/\D/g, "").length < 8) {
+      setErro("Informe um telefone válido com DDD.");
+      return;
+    }
     setErro(null);
     setCarregando(true);
     try {
@@ -86,6 +91,7 @@ export function RegistrarBarbeariaScreen() {
         nomeDono,
         email,
         senha,
+        telefone,
         planoId,
       });
       await enviarLogoSeHouver(data.barbearia.id);
@@ -152,6 +158,16 @@ export function RegistrarBarbeariaScreen() {
           <View style={styles.field}>
             <Text style={styles.label}>Senha</Text>
             <PasswordInput value={senha} onChangeText={setSenha} style={styles.input} placeholder="Mínimo 6 caracteres" />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Seu telefone (dono)</Text>
+            <TextInput
+              value={telefone}
+              onChangeText={setTelefone}
+              keyboardType="phone-pad"
+              style={styles.input}
+              placeholder="(11) 91234-5678"
+            />
           </View>
 
           <Text style={styles.label}>Plano</Text>

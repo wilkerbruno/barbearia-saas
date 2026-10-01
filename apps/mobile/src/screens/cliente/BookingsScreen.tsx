@@ -9,6 +9,7 @@ import { Card } from "../../components/Card";
 import { StatusBadge } from "../../components/StatusBadge";
 import { colors, spacing } from "../../theme/tokens";
 import { abrirNoMapa } from "../../utils/maps";
+import { ligarPara } from "../../utils/telefone";
 import { alertar } from "../../utils/alertaCompat";
 
 // Vários serviços marcados juntos (mesmo grupoId — ver BookingScreen) aparecem
@@ -85,12 +86,20 @@ export function BookingsScreen() {
               {barbearia && (
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm }}>
                   <Text style={styles.barbeariaNome}>{barbearia.nome}</Text>
-                  {temLocalizacao && (
-                    <Pressable style={styles.comoChegar} onPress={() => abrirNoMapa(barbearia)}>
-                      <Ionicons name="navigate" size={13} color={colors.accent} />
-                      <Text style={styles.comoChegarTexto}>Como chegar</Text>
-                    </Pressable>
-                  )}
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+                    {barbearia.telefone && (
+                      <Pressable style={styles.comoChegar} onPress={() => ligarPara(barbearia.telefone)}>
+                        <Ionicons name="call" size={13} color={colors.accent} />
+                        <Text style={styles.comoChegarTexto}>Ligar</Text>
+                      </Pressable>
+                    )}
+                    {temLocalizacao && (
+                      <Pressable style={styles.comoChegar} onPress={() => abrirNoMapa(barbearia)}>
+                        <Ionicons name="navigate" size={13} color={colors.accent} />
+                        <Text style={styles.comoChegarTexto}>Como chegar</Text>
+                      </Pressable>
+                    )}
+                  </View>
                 </View>
               )}
               <View style={{ gap: 2 }}>
