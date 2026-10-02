@@ -1,3 +1,9 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Barber One: agenda, equipe, comissão e financeiro da sua barbearia num só app. Baixe o app Android ou agende pela web.">
 <title>Barber One</title>
 <link rel="icon" href="assets/favicon-32.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -93,8 +99,9 @@
   .mobile-panel{
     display:flex;flex-direction:column;gap:14px;padding-block:16px;border-top:1px solid var(--border);
   }
+  .mobile-panel[hidden]{display:none;}
   .mobile-panel a{font-size:15px;text-decoration:none;color:var(--ink);}
-  @media(min-width:760px){nav.links{display:none;}.nav .links-desktop{display:flex;gap:28px;align-items:center;}}
+  @media(min-width:760px){.mobile-panel{display:none!important;}}
   .links-desktop{display:none;}
   @media(min-width:760px){.links-desktop{display:flex;gap:28px;align-items:center;}}
   .links-desktop a{font-size:14px;color:var(--ink-muted);text-decoration:none;}
@@ -212,6 +219,8 @@
   }
 </style>
 
+</head>
+<body>
 <header class="site">
   <div class="wrap nav">
     <div class="brand"><img class="brand-mark" src="assets/barberone-mark-128.png" alt="Barber One" width="38" height="38">Barber One</div>
@@ -414,3 +423,5 @@
     });
   })();
 </script>
+</body>
+</html>
