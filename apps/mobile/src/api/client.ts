@@ -1,4 +1,5 @@
 import axios from "axios";
+import { Platform } from "react-native";
 import { useAuthStore } from "../store/authStore";
 
 // Em desenvolvimento com o Expo Go num celular físico, troque "localhost" pelo
@@ -6,10 +7,20 @@ import { useAuthStore } from "../store/authStore";
 // No emulador Android, "localhost" não chega no host — use 10.0.2.2.
 export const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000/api";
 
-export const api = axios.create({ baseURL: API_URL });
+// `withCredentials` faz o navegador mandar/aceitar o cookie httpOnly de
+// sessão (ver authStore.ts e API: auth/jwt.strategy.ts) — só existe no Web;
+// no nativo o axios roda sobre outra camada de rede que não tem conceito de
+// cookie de navegador, então deixar isso ligado lá não faz nada (e dá pra
+// deixar de fora sem perda nenhuma).
+export const api = axios.create({ baseURL: API_URL, withCredentials: Platform.OS === "web" });
 
 // Injeta o token JWT salvo no authStore em toda requisição autenticada.
+// Só no nativo: no Web a autenticação vai inteira pelo cookie httpOnly
+// (automático via withCredentials acima) — o token nem fica acessível aqui
+// nesse caso (ver authStore.ts "entrar"/"restaurarSessao" web), então não
+// tem o que anexar.
 api.interceptors.request.use((config) => {
+  if (Platform.OS === "web") return config;
   const token = useAuthStore.getState().token;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

@@ -1,9 +1,31 @@
-import { Body, Controller, Post } from "@nestjs/common";
+import { Body, Controller, Post, Res } from "@nestjs/common";
+import { Response } from "express";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterClienteDto } from "./dto/register-cliente.dto";
 import { RegisterBarbeariaDto } from "./dto/register-barbearia.dto";
 import { Public } from "../common/decorators/public.decorator";
+import { COOKIE_TOKEN } from "./jwt.strategy";
+
+// Além do token no corpo da resposta (como sempre — é o que o app nativo usa,
+// guardado no Keychain/Keystore via expo-secure-store), também seta o mesmo
+// token num cookie httpOnly. É só a versão web do app (Expo Web, ver
+// secureStorage.web.ts) que depende desse cookie: lá o token nunca fica em
+// localStorage, então nem um script malicioso (XSS) consegue ler. `secure`
+// fica ligado sempre — o site roda em HTTPS (ver barberone.store) — e
+// `sameSite: lax` já cobre o caso de app.barberone.store chamando
+// api.barberone.store (mesmo domínio-base, subdomínios diferentes).
+const UM_DIA_MS = 24 * 60 * 60 * 1000;
+
+function setarCookieToken(res: Response, token: string) {
+  res.cookie(COOKIE_TOKEN, token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "lax",
+    maxAge: 7 * UM_DIA_MS, // acompanha o JWT_EXPIRES_IN padrão (7d) — ver auth.module.ts
+    path: "/",
+  });
+}
 
 @Controller("auth")
 export class AuthController {
@@ -11,20 +33,36 @@ export class AuthController {
 
   @Public()
   @Post("login")
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
+    const resultado = await this.authService.login(dto);
+    setarCookieToken(res, resultado.accessToken);
+    return resultado;
   }
 
   @Public()
   @Post("registrar-cliente")
-  registerCliente(@Body() dto: RegisterClienteDto) {
-    return this.authService.registerCliente(dto);
+  async registerCliente(@Body() dto: RegisterClienteDto, @Res({ passthrough: true }) res: Response) {
+    const resultado = await this.authService.registerCliente(dto);
+    setarCookieToken(res, resultado.accessToken);
+    return resultado;
   }
 
   // Onboarding de uma nova barbearia assinante do SaaS.
   @Public()
   @Post("registrar-barbearia")
-  registerBarbearia(@Body() dto: RegisterBarbeariaDto) {
-    return this.authService.registerBarbearia(dto);
+  async registerBarbearia(@Body() dto: RegisterBarbeariaDto, @Res({ passthrough: true }) res: Response) {
+    const resultado = await this.authService.registerBarbearia(dto);
+    setarCookieToken(res, resultado.accessToken);
+    return resultado;
+  }
+
+  // Só a versão web usa isso (ver authStore.ts "logout" web) — o
+  // JavaScript da página não consegue apagar um cookie httpOnly sozinho,
+  // então precisa pedir pro backend limpar.
+  @Public()
+  @Post("logout")
+  logout(@Res({ passthrough: true }) res: Response) {
+    res.clearCookie(COOKIE_TOKEN, { path: "/" });
+    return { ok: true };
   }
 }

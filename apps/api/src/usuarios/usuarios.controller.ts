@@ -1,4 +1,4 @@
-import { Body, Controller, Patch } from "@nestjs/common";
+import { Body, Controller, Get, Patch } from "@nestjs/common";
 import { UsuariosService } from "./usuarios.service";
 import { SalvarPushTokenDto } from "./dto/salvar-push-token.dto";
 import { UpdateMeuPerfilDto } from "./dto/update-meu-perfil.dto";
@@ -8,6 +8,14 @@ import { AuthUser } from "../auth/jwt.strategy";
 @Controller("usuarios")
 export class UsuariosController {
   constructor(private usuariosService: UsuariosService) {}
+
+  // Usado pela versão web do app ao abrir (ver authStore.ts "restaurarSessao"
+  // web): autentica só pelo cookie httpOnly, sem precisar de token nenhum
+  // salvo em localStorage.
+  @Get("meu-perfil")
+  buscarMeuPerfil(@CurrentUser() user: AuthUser) {
+    return this.usuariosService.buscarMeuPerfil(user.id);
+  }
 
   // Qualquer papel logado pode salvar o próprio token — hoje só é usado pro
   // aviso de assinatura vencendo (equipe da barbearia), mas é um dado inócuo

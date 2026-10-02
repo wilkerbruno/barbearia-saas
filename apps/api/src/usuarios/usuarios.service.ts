@@ -19,6 +19,14 @@ export class UsuariosService {
     return { ok: true };
   }
 
+  // Usado pela versão web do app pra reidratar o usuário logado a cada
+  // abertura (ver authStore.ts "restaurarSessao" web) — lá nada sensível
+  // fica salvo em localStorage, então os dados reais vêm de novo da API a
+  // cada carregamento, autenticado só pelo cookie httpOnly.
+  async buscarMeuPerfil(usuarioId: string) {
+    return this.prisma.usuario.findUniqueOrThrow({ where: { id: usuarioId }, select: SELECT_SEGURO });
+  }
+
   // Tela "Perfil" (cliente, funcionário e dono) — cada um edita os próprios
   // dados básicos. O telefone do FUNCIONARIO é exclusivo da barbearia (ver
   // FuncionariosService.atualizar): recusa aqui em vez de simplesmente
