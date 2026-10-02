@@ -6,6 +6,7 @@ import { CreateFuncionarioDto } from "./dto/create-funcionario.dto";
 import { UpdateFuncionarioDto } from "./dto/update-funcionario.dto";
 import { DefinirHorariosDto } from "./dto/definir-horarios.dto";
 import { CreateFolgaDto } from "./dto/create-folga.dto";
+import { camposEndereco } from "../common/endereco.util";
 
 @Injectable()
 export class FuncionariosService {
@@ -42,12 +43,13 @@ export class FuncionariosService {
           senhaHash,
           telefone: dto.telefone,
           // Endereço do funcionário (obrigatório no cadastro). ATENÇÃO:
-          // nunca incluir `endereco` nos `select`/`include` de usuario
-          // feitos a partir daqui (listarDaBarbearia, o retorno deste
-          // método, atualizar) — o dono da barbearia nunca pode ver o
-          // endereço do funcionário, só o próprio funcionário (via
-          // "meu-perfil", que usa SELECT_SEGURO em UsuariosService).
-          endereco: dto.endereco,
+          // nunca incluir `cep`/`logradouro`/`numero`/`complemento`/`bairro`/
+          // `cidade`/`uf`/`endereco` nos `select`/`include` de usuario feitos
+          // a partir daqui (listarDaBarbearia, o retorno deste método,
+          // atualizar) — o dono da barbearia nunca pode ver o endereço do
+          // funcionário, só o próprio funcionário (via "meu-perfil", que usa
+          // SELECT_SEGURO em UsuariosService).
+          ...camposEndereco(dto.endereco),
           papel: Papel.FUNCIONARIO,
           barbeariaId,
         },

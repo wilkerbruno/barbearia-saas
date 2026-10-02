@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
+import { EnderecoForm, enderecoParaApi, enderecoValido, EnderecoValores } from "../../components/EnderecoForm";
 import { colors, radius, spacing } from "../../theme/tokens";
 
 // Tela "Perfil > Editar perfil" do cliente — edita os próprios dados
@@ -17,7 +18,15 @@ export function EditarPerfilScreen() {
   const [nome, setNome] = useState(usuario?.nome ?? "");
   const [email, setEmail] = useState(usuario?.email ?? "");
   const [telefone, setTelefone] = useState(usuario?.telefone ?? "");
-  const [endereco, setEndereco] = useState(usuario?.endereco ?? "");
+  const [endereco, setEndereco] = useState<EnderecoValores>({
+    cep: usuario?.cep ?? "",
+    logradouro: usuario?.logradouro ?? "",
+    numero: usuario?.numero ?? "",
+    complemento: usuario?.complemento ?? "",
+    bairro: usuario?.bairro ?? "",
+    cidade: usuario?.cidade ?? "",
+    uf: usuario?.uf ?? "",
+  });
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -28,7 +37,7 @@ export function EditarPerfilScreen() {
     if (!nome.trim()) return setErro("Digite seu nome.");
     if (!email.includes("@")) return setErro("Digite um e-mail válido.");
     if (telefone.replace(/\D/g, "").length < 8) return setErro("Digite um telefone válido com DDD.");
-    if (endereco.trim().length < 10) return setErro("Digite seu endereço completo.");
+    if (!enderecoValido(endereco)) return setErro("Digite seu endereço completo (CEP, rua, número, bairro e cidade).");
 
     setSalvando(true);
     try {
@@ -36,7 +45,7 @@ export function EditarPerfilScreen() {
         nome: nome.trim(),
         email: email.trim().toLowerCase(),
         telefone: telefone.trim(),
-        endereco: endereco.trim(),
+        endereco: enderecoParaApi(endereco),
       });
       await atualizarUsuario(data);
       setSucesso(true);
@@ -76,15 +85,7 @@ export function EditarPerfilScreen() {
               placeholder="(11) 91234-5678"
             />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Endereço completo</Text>
-            <TextInput
-              value={endereco}
-              onChangeText={setEndereco}
-              style={styles.input}
-              placeholder="Rua, número, bairro, cidade - UF"
-            />
-          </View>
+          <EnderecoForm valores={endereco} onChange={setEndereco} />
 
           {erro && <Text style={styles.erro}>{erro}</Text>}
           {sucesso && <Text style={styles.sucesso}>Dados atualizados com sucesso.</Text>}

@@ -1,4 +1,6 @@
-import { IsEmail, IsString, MinLength } from "class-validator";
+import { IsEmail, IsString, MinLength, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+import { EnderecoDto } from "../../common/dto/endereco.dto";
 
 // Cadastro de um cliente final (quem agenda horário no app).
 export class RegisterClienteDto {
@@ -18,11 +20,13 @@ export class RegisterClienteDto {
   @MinLength(8)
   telefone: string;
 
-  // Endereço completo do cliente — nunca é devolvido pra barbearia/funcionário
-  // (ver comentário em Usuario.endereco no schema e SELECT_SEGURO em
-  // UsuariosService; os selects usados por FuncionariosService/AgendamentosService
-  // pra mostrar o cliente pra barbearia nunca incluem este campo).
-  @IsString()
-  @MinLength(10)
-  endereco: string;
+  // Endereço completo do cliente (CEP + campos separados — o app preenche
+  // logradouro/bairro/cidade/UF a partir do CEP via ViaCEP) — nunca é
+  // devolvido pra barbearia/funcionário (ver comentário em Usuario.endereco
+  // no schema e SELECT_SEGURO em UsuariosService; os selects usados por
+  // FuncionariosService/AgendamentosService pra mostrar o cliente pra
+  // barbearia nunca incluem este campo).
+  @ValidateNested()
+  @Type(() => EnderecoDto)
+  endereco: EnderecoDto;
 }

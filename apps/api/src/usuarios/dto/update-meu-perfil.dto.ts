@@ -1,4 +1,6 @@
-import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsOptional, IsString, MinLength, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+import { EnderecoDto } from "../../common/dto/endereco.dto";
 
 // "Perfil" no menu de cliente/funcionário/dono — cada um edita os próprios
 // dados cadastrais básicos. O telefone é aceito aqui pra CLIENTE e
@@ -19,13 +21,14 @@ export class UpdateMeuPerfilDto {
   @MinLength(8)
   telefone?: string;
 
-  // CLIENTE e FUNCIONARIO editam o próprio endereço por aqui (é obrigatório
-  // só no cadastro — ver RegisterClienteDto/CreateFuncionarioDto; depois de
-  // criada a conta, dá pra corrigir/completar à vontade). BARBEARIA_ADMIN não
-  // usa este campo (o endereço que importa pra ele é o da Barbearia, editado
-  // em PATCH /barbearias/:id).
+  // CLIENTE e FUNCIONARIO editam o próprio endereço por aqui (CEP + campos
+  // separados — é obrigatório só no cadastro — ver
+  // RegisterClienteDto/CreateFuncionarioDto; depois de criada a conta, dá
+  // pra corrigir/completar à vontade). BARBEARIA_ADMIN não usa este campo (o
+  // endereço que importa pra ele é o da Barbearia, editado em
+  // PATCH /barbearias/:id).
   @IsOptional()
-  @IsString()
-  @MinLength(10)
-  endereco?: string;
+  @ValidateNested()
+  @Type(() => EnderecoDto)
+  endereco?: EnderecoDto;
 }

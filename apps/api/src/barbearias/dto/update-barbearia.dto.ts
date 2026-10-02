@@ -1,13 +1,19 @@
-import { IsLatitude, IsLongitude, IsOptional, IsString } from "class-validator";
+import { IsLatitude, IsLongitude, IsOptional, IsString, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+import { EnderecoDto } from "../../common/dto/endereco.dto";
 
 export class UpdateBarbeariaDto {
   @IsOptional()
   @IsString()
   nome?: string;
 
+  // Endereço do estabelecimento (CEP + campos separados) — ver
+  // EnderecoDto/EnderecoUtil. Opcional aqui (edição posterior); obrigatório
+  // no cadastro inicial (RegisterBarbeariaDto).
   @IsOptional()
-  @IsString()
-  endereco?: string;
+  @ValidateNested()
+  @Type(() => EnderecoDto)
+  endereco?: EnderecoDto;
 
   @IsOptional()
   @IsString()

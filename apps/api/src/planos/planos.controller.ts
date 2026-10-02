@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post } from "@nestjs/common";
 import { Papel } from "@barbearia-saas/shared";
 import { PlanosService } from "./planos.service";
 import { CreatePlanoDto } from "./dto/create-plano.dto";
@@ -32,5 +32,11 @@ export class PlanosController {
   @Patch(":id")
   atualizar(@Param("id") id: string, @Body() dto: UpdatePlanoDto) {
     return this.planosService.atualizar(id, dto);
+  }
+
+  @Roles(Papel.SAAS_ADMIN)
+  @Delete(":id")
+  excluir(@Param("id") id: string) {
+    return this.planosService.excluir(id);
   }
 }

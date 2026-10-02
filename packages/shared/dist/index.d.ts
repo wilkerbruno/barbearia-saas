@@ -5,21 +5,38 @@ export declare const Papel: {
     readonly SAAS_ADMIN: "SAAS_ADMIN";
 };
 export type Papel = (typeof Papel)[keyof typeof Papel];
-export interface Usuario {
+export interface Endereco {
+    cep: string;
+    logradouro: string;
+    numero: string;
+    complemento?: string;
+    bairro: string;
+    cidade: string;
+    uf: string;
+}
+export interface EnderecoCampos {
+    cep?: string | null;
+    logradouro?: string | null;
+    numero?: string | null;
+    complemento?: string | null;
+    bairro?: string | null;
+    cidade?: string | null;
+    uf?: string | null;
+    endereco?: string | null;
+}
+export interface Usuario extends EnderecoCampos {
     id: string;
     nome: string;
     email: string;
     telefone?: string | null;
-    endereco?: string | null;
     papel: Papel;
     barbeariaId?: string | null;
     criadoEm: string;
 }
-export interface Barbearia {
+export interface Barbearia extends EnderecoCampos {
     id: string;
     nome: string;
     slug: string;
-    endereco?: string | null;
     telefone?: string | null;
     latitude?: number | null;
     longitude?: number | null;

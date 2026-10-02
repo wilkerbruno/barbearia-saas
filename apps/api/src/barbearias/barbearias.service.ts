@@ -7,6 +7,7 @@ import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
 import { estaForaDaCarencia } from "../assinaturas/assinatura-status.util";
 import { UpdateBarbeariaDto } from "./dto/update-barbearia.dto";
 import { CreateAvaliacaoDto } from "./dto/create-avaliacao.dto";
+import { camposEndereco } from "../common/endereco.util";
 
 // Campos seguros para expor sem autenticação (busca de proximidade, tela
 // pública "sobre a barbearia" etc). Nunca inclua e-mail/telefone de usuários
@@ -26,6 +27,26 @@ const SELECT_PUBLICO = {
   notaMedia: true,
   totalAvaliacoes: true,
   mercadoPagoPublicKey: true,
+} as const;
+
+// Pra quem já tem acesso à barbearia (dono, funcionário dela, ou SAAS_ADMIN —
+// ver BarbeariasController.garantirAcesso): em cima do que já é público,
+// inclui os campos separados do endereço (pra reabrir o formulário de edição
+// já preenchido — ver EditarPerfilScreen) e o status (não o segredo) da
+// conexão com o Mercado Pago. NUNCA inclua mercadoPagoAccessToken/
+// mercadoPagoRefreshToken aqui nem troque isso por um `include` genérico.
+const SELECT_DETALHE = {
+  ...SELECT_PUBLICO,
+  cep: true,
+  logradouro: true,
+  numero: true,
+  complemento: true,
+  bairro: true,
+  cidade: true,
+  uf: true,
+  mercadoPagoUserId: true,
+  mercadoPagoConectadoEm: true,
+  criadoEm: true,
 } as const;
 
 // Tamanho máximo aceito pro arquivo de logo enviado (antes de comprimir).
@@ -57,9 +78,14 @@ export class BarbeariasService {
   }
 
   async buscarPorId(id: string) {
+    // Select explícito (não `include` genérico) — ver comentário em
+    // SELECT_DETALHE: esse endpoint é alcançável por qualquer funcionário da
+    // própria barbearia, não só o dono, então nunca pode vazar os segredos
+    // do Mercado Pago.
     const barbearia = await this.prisma.barbearia.findUnique({
       where: { id },
-      include: {
+      select: {
+        ...SELECT_DETALHE,
         assinatura: { include: { plano: true, faturas: { orderBy: { vencimentoEm: "desc" }, take: 12 } } },
         funcionarios: { include: { usuario: { select: { id: true, nome: true, email: true } } } },
       },
@@ -76,7 +102,11 @@ export class BarbeariasService {
   }
 
   atualizar(id: string, dto: UpdateBarbeariaDto) {
-    return this.prisma.barbearia.update({ where: { id }, data: dto });
+    const { endereco, ...resto } = dto;
+    return this.prisma.barbearia.update({
+      where: { id },
+      data: { ...resto, ...(endereco ? camposEndereco(endereco) : {}) },
+    });
   }
 
   // Recebe o arquivo de logo enviado pelo dono (registro da barbearia ou

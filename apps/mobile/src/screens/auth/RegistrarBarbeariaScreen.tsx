@@ -9,6 +9,7 @@ import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { PasswordInput } from "../../components/PasswordInput";
+import { ENDERECO_VAZIO, EnderecoForm, enderecoParaApi, enderecoValido } from "../../components/EnderecoForm";
 import { colors, radius, spacing } from "../../theme/tokens";
 
 // Onboarding de uma nova barbearia assinante do SaaS, pelo próprio app:
@@ -21,7 +22,7 @@ export function RegistrarBarbeariaScreen() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [telefone, setTelefone] = useState("");
-  const [endereco, setEndereco] = useState("");
+  const [endereco, setEndereco] = useState(ENDERECO_VAZIO);
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [planoId, setPlanoId] = useState<string | null>(null);
   const [logo, setLogo] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -84,8 +85,8 @@ export function RegistrarBarbeariaScreen() {
       setErro("Informe um telefone válido com DDD.");
       return;
     }
-    if (endereco.trim().length < 10) {
-      setErro("Informe o endereço completo da barbearia.");
+    if (!enderecoValido(endereco)) {
+      setErro("Informe o endereço completo da barbearia (CEP, rua, número, bairro e cidade).");
       return;
     }
     setErro(null);
@@ -97,7 +98,7 @@ export function RegistrarBarbeariaScreen() {
         email,
         senha,
         telefone,
-        endereco,
+        endereco: enderecoParaApi(endereco),
         planoId,
       });
       await enviarLogoSeHouver(data.barbearia.id);
@@ -175,15 +176,8 @@ export function RegistrarBarbeariaScreen() {
               placeholder="(11) 91234-5678"
             />
           </View>
-          <View style={styles.field}>
-            <Text style={styles.label}>Endereço completo da barbearia</Text>
-            <TextInput
-              value={endereco}
-              onChangeText={setEndereco}
-              style={styles.input}
-              placeholder="Rua, número, bairro, cidade - UF"
-            />
-          </View>
+          <Text style={styles.label}>Endereço da barbearia</Text>
+          <EnderecoForm valores={endereco} onChange={setEndereco} />
 
           <Text style={styles.label}>Plano</Text>
           <View style={{ gap: spacing.sm }}>

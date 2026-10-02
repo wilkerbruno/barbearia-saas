@@ -1,4 +1,6 @@
-import { IsEmail, IsInt, IsOptional, IsString, Max, Min, MinLength } from "class-validator";
+import { IsEmail, IsInt, IsOptional, IsString, Max, Min, MinLength, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+import { EnderecoDto } from "../../common/dto/endereco.dto";
 
 // O dono da barbearia cadastra a conta do funcionário (nome/e-mail/senha) —
 // não existe autocadastro de funcionário, é sempre um convite feito pelo dono.
@@ -24,14 +26,15 @@ export class CreateFuncionarioDto {
   @MinLength(8)
   telefone?: string;
 
-  // Endereço completo do funcionário — obrigatório, mas NUNCA é devolvido pra
-  // barbearia depois de cadastrado (nem em listarDaBarbearia, nem no retorno
-  // deste próprio cadastro): o dono digita aqui uma vez, só o próprio
-  // funcionário consegue ver/editar depois, em "Perfil" (GET/PATCH
-  // /usuarios/meu-perfil). Ver comentário em Usuario.endereco no schema.
-  @IsString()
-  @MinLength(10)
-  endereco: string;
+  // Endereço completo do funcionário (CEP + campos separados) — obrigatório,
+  // mas NUNCA é devolvido pra barbearia depois de cadastrado (nem em
+  // listarDaBarbearia, nem no retorno deste próprio cadastro): o dono digita
+  // aqui uma vez, só o próprio funcionário consegue ver/editar depois, em
+  // "Perfil" (GET/PATCH /usuarios/meu-perfil). Ver comentário em
+  // Usuario.endereco no schema.
+  @ValidateNested()
+  @Type(() => EnderecoDto)
+  endereco: EnderecoDto;
 
   @IsOptional()
   @IsString()

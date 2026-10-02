@@ -2,18 +2,26 @@ import { ConflictException, ForbiddenException, Injectable } from "@nestjs/commo
 import { Papel } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateMeuPerfilDto } from "./dto/update-meu-perfil.dto";
+import { camposEndereco } from "../common/endereco.util";
 
 // Campos devolvidos depois de editar o perfil — mesmo formato do Usuario
 // "seguro" (sem senhaHash) usado em AuthService.login/registerCliente, pra o
 // app poder atualizar o authStore direto com a resposta.
-// Inclui `endereco` de propósito: esta constante SÓ é usada em respostas
-// "sobre mim mesmo" (login/registro/meu-perfil) — NUNCA pra expor o
-// usuário de outra pessoa. Ver comentário em Usuario.endereco no schema.
+// Inclui os campos de endereço de propósito: esta constante SÓ é usada em
+// respostas "sobre mim mesmo" (login/registro/meu-perfil) — NUNCA pra expor
+// o usuário de outra pessoa. Ver comentário em Usuario.endereco no schema.
 const SELECT_SEGURO = {
   id: true,
   nome: true,
   email: true,
   telefone: true,
+  cep: true,
+  logradouro: true,
+  numero: true,
+  complemento: true,
+  bairro: true,
+  cidade: true,
+  uf: true,
   endereco: true,
   papel: true,
   barbeariaId: true,
@@ -57,7 +65,12 @@ export class UsuariosService {
 
     return this.prisma.usuario.update({
       where: { id: usuarioId },
-      data: { nome: dto.nome, email: dto.email, telefone: dto.telefone, endereco: dto.endereco },
+      data: {
+        nome: dto.nome,
+        email: dto.email,
+        telefone: dto.telefone,
+        ...(dto.endereco ? camposEndereco(dto.endereco) : {}),
+      },
       select: SELECT_SEGURO,
     });
   }

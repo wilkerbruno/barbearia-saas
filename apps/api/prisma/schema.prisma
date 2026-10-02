@@ -100,6 +100,18 @@ model Barbearia {
   id        String   @id @default(uuid())
   nome      String
   slug      String   @unique
+  // Endereço do estabelecimento, em campos separados (preenchidos no app a
+  // partir do CEP, via ViaCEP) + `endereco`, o texto já formatado pronto pra
+  // exibir — é o que o resto do código (telas do cliente, painel SaaS) já lia
+  // como string única antes de virar campos separados. É público (o cliente
+  // final vê o endereço da barbearia pra saber pra onde ir).
+  cep         String?
+  logradouro  String?
+  numero      String?
+  complemento String?
+  bairro      String?
+  cidade      String?
+  uf          String?
   endereco  String?
   telefone  String?
   // Logo da barbearia enviada pelo dono (Mais > Logo, ou no cadastro). Guardada
@@ -160,20 +172,30 @@ model Usuario {
   email        String    @unique
   senhaHash    String
   telefone     String?
-  // Endereço completo (rua, número, bairro, cidade, UF, CEP tudo num campo
-  // só — mesmo estilo do Barbearia.endereco acima). Obrigatório no cadastro
-  // de CLIENTE (RegisterClienteDto) e de FUNCIONARIO (CreateFuncionarioDto);
-  // nullable aqui só pra não quebrar usuários criados antes dessa coluna
-  // existir, e porque BARBEARIA_ADMIN/SAAS_ADMIN não preenchem este campo
-  // (o endereço que importa pro dono é o da própria Barbearia, acima).
+  // Endereço completo, em campos separados (CEP + logradouro/número/bairro/
+  // cidade/UF — preenchidos no app a partir do CEP via ViaCEP) + `endereco`,
+  // o texto já formatado (ver EnderecoDto/EnderecoUtil na API). Obrigatório
+  // no cadastro de CLIENTE (RegisterClienteDto) e de FUNCIONARIO
+  // (CreateFuncionarioDto); nullable aqui só pra não quebrar usuários criados
+  // antes dessas colunas existirem, e porque BARBEARIA_ADMIN/SAAS_ADMIN não
+  // preenchem esses campos (o endereço que importa pro dono é o da própria
+  // Barbearia, acima).
   // ATENÇÃO (privacidade): o endereço do CLIENTE nunca pode ser devolvido
   // pela API pra BARBEARIA_ADMIN/FUNCIONARIO, e o endereço do FUNCIONARIO
   // nunca pode ser devolvido pra CLIENTE nem (apesar de ele ter cadastrado)
   // reexposto depois pro BARBEARIA_ADMIN — só SELECT_SEGURO (usuarios.service.ts,
-  // usado só em "meu-perfil", sempre o próprio usuário) inclui este campo.
-  // Nunca adicione `endereco` nos selects de FuncionariosService nem em
-  // qualquer select de `cliente`/`usuario` feito a partir de Agendamento,
-  // Avaliacao, Funcionario etc.
+  // usado só em "meu-perfil", sempre o próprio usuário) inclui esses campos.
+  // Nunca adicione `cep`/`logradouro`/`numero`/`complemento`/`bairro`/`cidade`/
+  // `uf`/`endereco` nos selects de FuncionariosService nem em qualquer select
+  // de `cliente`/`usuario` feito a partir de Agendamento, Avaliacao,
+  // Funcionario etc.
+  cep          String?
+  logradouro   String?
+  numero       String?
+  complemento  String?
+  bairro       String?
+  cidade       String?
+  uf           String?
   endereco     String?
   papel        Papel
   barbeariaId  String?

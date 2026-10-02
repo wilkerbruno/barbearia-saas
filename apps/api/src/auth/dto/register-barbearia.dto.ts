@@ -1,4 +1,6 @@
-import { IsEmail, IsString, MinLength } from "class-validator";
+import { IsEmail, IsString, MinLength, ValidateNested } from "class-validator";
+import { Type } from "class-transformer";
+import { EnderecoDto } from "../../common/dto/endereco.dto";
 
 // Onboarding de uma nova barbearia no SaaS: cria o tenant (Barbearia) +
 // o usuário dono (papel BARBEARIA_ADMIN) + assinatura em TRIAL no plano informado.
@@ -23,13 +25,14 @@ export class RegisterBarbeariaDto {
   @MinLength(8)
   telefone: string;
 
-  // Endereço completo do ESTABELECIMENTO (Barbearia.endereco) — diferente da
-  // localização por GPS (latitude/longitude, capturada depois em "Mais >
-  // Localização"). Visível pro cliente (é o endereço que ele usa pra achar a
-  // barbearia), ver SELECT_PUBLICO em BarbeariasService.
-  @IsString()
-  @MinLength(10)
-  endereco: string;
+  // Endereço completo do ESTABELECIMENTO (CEP + campos separados — Barbearia
+  // .endereco/.cep/.logradouro/...) — diferente da localização por GPS
+  // (latitude/longitude, capturada depois em "Mais > Localização"). Visível
+  // pro cliente (é o endereço que ele usa pra achar a barbearia), ver
+  // SELECT_PUBLICO em BarbeariasService.
+  @ValidateNested()
+  @Type(() => EnderecoDto)
+  endereco: EnderecoDto;
 
   @IsString()
   planoId: string;

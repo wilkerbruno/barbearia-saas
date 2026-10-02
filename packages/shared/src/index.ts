@@ -20,21 +20,51 @@ export const Papel = {
 } as const;
 export type Papel = (typeof Papel)[keyof typeof Papel];
 
+// ============================= ENDEREÇO =============================
+
+// Endereço estruturado (CEP + campos separados) — formato ENVIADO pela API
+// no cadastro de CLIENTE/FUNCIONARIO/BARBEARIA e nas edições depois. O app
+// preenche logradouro/bairro/cidade/uf a partir do CEP (consulta ViaCEP)
+// antes de enviar; numero/complemento continuam digitados à mão. Ver
+// EnderecoDto/EnderecoUtil na API (mesmo formato, espelhado).
+export interface Endereco {
+  cep: string;
+  logradouro: string;
+  numero: string;
+  complemento?: string;
+  bairro: string;
+  cidade: string;
+  uf: string;
+}
+
+// Os mesmos campos como vêm GRAVADOS (opcionais/nullable) num Usuario ou
+// numa Barbearia já cadastrados — `endereco` é o texto já formatado (ver
+// EnderecoUtil.montarEnderecoCompleto), pronto pra exibir sem juntar os
+// campos de novo.
+export interface EnderecoCampos {
+  cep?: string | null;
+  logradouro?: string | null;
+  numero?: string | null;
+  complemento?: string | null;
+  bairro?: string | null;
+  cidade?: string | null;
+  uf?: string | null;
+  endereco?: string | null;
+}
+
 // ============================= USUÁRIO =============================
 
-export interface Usuario {
+// ATENÇÃO (privacidade): este tipo é só para a visão "meu-perfil" (o próprio
+// usuário vendo os próprios dados) — nunca reutilize `Usuario` para
+// representar como um FUNCIONARIO aparece pra um CLIENTE, ou como um CLIENTE
+// aparece pra uma BARBEARIA/FUNCIONARIO. Esses casos têm seus próprios tipos
+// restritos (ver FuncionarioPublico, FuncionarioDetalhado) que não incluem e
+// não devem incluir os campos de endereço (EnderecoCampos).
+export interface Usuario extends EnderecoCampos {
   id: string;
   nome: string;
   email: string;
   telefone?: string | null;
-  // Endereço completo (obrigatório no cadastro de CLIENTE/FUNCIONARIO).
-  // ATENÇÃO (privacidade): este tipo é só para a visão "meu-perfil" (o
-  // próprio usuário vendo os próprios dados) — nunca reutilize `Usuario`
-  // para representar como um FUNCIONARIO aparece pra um CLIENTE, ou como um
-  // CLIENTE aparece pra uma BARBEARIA/FUNCIONARIO. Esses casos têm seus
-  // próprios tipos restritos (ver FuncionarioPublico, FuncionarioDetalhado)
-  // que não incluem e não devem incluir este campo.
-  endereco?: string | null;
   papel: Papel;
   barbeariaId?: string | null; // null para CLIENTE (pode agendar em várias) e SAAS_ADMIN
   criadoEm: string;
@@ -42,11 +72,10 @@ export interface Usuario {
 
 // ============================= BARBEARIA (TENANT) =============================
 
-export interface Barbearia {
+export interface Barbearia extends EnderecoCampos {
   id: string;
   nome: string;
   slug: string;
-  endereco?: string | null;
   telefone?: string | null;
   latitude?: number | null;
   longitude?: number | null;

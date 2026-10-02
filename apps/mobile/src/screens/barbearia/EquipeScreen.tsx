@@ -10,12 +10,13 @@ import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { PasswordInput } from "../../components/PasswordInput";
+import { ENDERECO_VAZIO, EnderecoForm, enderecoParaApi, enderecoValido } from "../../components/EnderecoForm";
 import { colors, radius, spacing } from "../../theme/tokens";
 import { MaisStackParamList } from "../../navigation/MaisStack";
 
 type Props = NativeStackScreenProps<MaisStackParamList, "Equipe">;
 
-const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", telefone: "", endereco: "", cargo: "", comissaoPercentual: "60" };
+const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", telefone: "", cargo: "", comissaoPercentual: "60" };
 
 interface Assinatura {
   plano: { nome: string; limiteFuncionarios: number | null };
@@ -31,6 +32,7 @@ export function EquipeScreen({ navigation }: Props) {
   const [assinatura, setAssinatura] = useState<Assinatura | null>(null);
   const [formAberto, setFormAberto] = useState(false);
   const [campos, setCampos] = useState(FUNCIONARIO_VAZIO);
+  const [endereco, setEndereco] = useState(ENDERECO_VAZIO);
   const [salvando, setSalvando] = useState(false);
   // Edição do telefone de um funcionário já cadastrado — só o dono tem acesso
   // a esse campo (ver UsuariosService.atualizarMeuPerfil, que recusa o
@@ -56,6 +58,7 @@ export function EquipeScreen({ navigation }: Props) {
 
   function abrirNovo() {
     setCampos(FUNCIONARIO_VAZIO);
+    setEndereco(ENDERECO_VAZIO);
     setFormAberto(true);
   }
 
@@ -77,12 +80,19 @@ export function EquipeScreen({ navigation }: Props) {
       return alertar("Telefone inválido", "Digite um telefone válido com DDD, ou deixe em branco.");
     }
 
-    const endereco = campos.endereco.trim();
-    if (endereco.length < 10) {
-      return alertar("Endereço obrigatório", "Digite o endereço completo do funcionário (rua, número, bairro, cidade).");
+    if (!enderecoValido(endereco)) {
+      return alertar("Endereço obrigatório", "Digite o endereço completo do funcionário (CEP, rua, número, bairro, cidade).");
     }
 
-    const dto = { nome, email, senha, telefone, endereco, cargo: campos.cargo.trim() || undefined, comissaoPercentual };
+    const dto = {
+      nome,
+      email,
+      senha,
+      telefone,
+      endereco: enderecoParaApi(endereco),
+      cargo: campos.cargo.trim() || undefined,
+      comissaoPercentual,
+    };
     setSalvando(true);
     try {
       await api.post("/funcionarios", dto);
@@ -181,16 +191,11 @@ export function EquipeScreen({ navigation }: Props) {
                 keyboardType="phone-pad"
                 style={styles.input}
               />
-              <TextInput
-                value={campos.endereco}
-                onChangeText={(endereco) => setCampos((c) => ({ ...c, endereco }))}
-                placeholder="Endereço completo do funcionário"
-                placeholderTextColor={colors.inkMuted}
-                style={styles.input}
+              <EnderecoForm
+                valores={endereco}
+                onChange={setEndereco}
+                hint='O endereço é só do funcionário: depois de cadastrado, só ele vê ou edita esse dado (em "Perfil").'
               />
-              <Text style={styles.hint}>
-                O endereço é só do funcionário: depois de cadastrado, só ele vê ou edita esse dado (em "Perfil").
-              </Text>
               <View style={{ flexDirection: "row", gap: spacing.sm }}>
                 <TextInput
                   value={campos.cargo}

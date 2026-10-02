@@ -7,6 +7,7 @@ import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
 import { LoginDto } from "./dto/login.dto";
 import { RegisterClienteDto } from "./dto/register-cliente.dto";
 import { RegisterBarbeariaDto } from "./dto/register-barbearia.dto";
+import { camposEndereco } from "../common/endereco.util";
 
 function slugify(texto: string): string {
   return texto
@@ -59,7 +60,7 @@ export class AuthService {
         email: dto.email,
         senhaHash,
         telefone: dto.telefone,
-        endereco: dto.endereco,
+        ...camposEndereco(dto.endereco),
         papel: Papel.CLIENTE,
       },
     });
@@ -94,7 +95,7 @@ export class AuthService {
         // e no endereço do estabelecimento. O dono pode trocar depois em
         // Mais > Editar perfil > Dados da barbearia (EditarPerfilScreen),
         // sem afetar os dados pessoais dele.
-        data: { nome: dto.nomeBarbearia, slug, telefone: dto.telefone, endereco: dto.endereco },
+        data: { nome: dto.nomeBarbearia, slug, telefone: dto.telefone, ...camposEndereco(dto.endereco) },
       });
 
       const dono = await tx.usuario.create({

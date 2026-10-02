@@ -7,6 +7,7 @@ import { api } from "../../api/client";
 import { useAuthStore } from "../../store/authStore";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
+import { ENDERECO_VAZIO, EnderecoForm, enderecoParaApi, enderecoValido } from "../../components/EnderecoForm";
 import { colors, radius, spacing } from "../../theme/tokens";
 
 // Tela "Mais > Editar perfil" do dono — edita tanto os próprios dados
@@ -26,7 +27,7 @@ export function EditarPerfilScreen() {
   const [email, setEmail] = useState(usuario?.email ?? "");
   const [telefone, setTelefone] = useState(usuario?.telefone ?? "");
   const [nomeBarbearia, setNomeBarbearia] = useState("");
-  const [enderecoBarbearia, setEnderecoBarbearia] = useState("");
+  const [enderecoBarbearia, setEnderecoBarbearia] = useState(ENDERECO_VAZIO);
   const [telefoneBarbearia, setTelefoneBarbearia] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
@@ -38,7 +39,15 @@ export function EditarPerfilScreen() {
     try {
       const { data } = await api.get<Barbearia>(`/barbearias/${barbeariaId}`);
       setNomeBarbearia(data.nome ?? "");
-      setEnderecoBarbearia(data.endereco ?? "");
+      setEnderecoBarbearia({
+        cep: data.cep ?? "",
+        logradouro: data.logradouro ?? "",
+        numero: data.numero ?? "",
+        complemento: data.complemento ?? "",
+        bairro: data.bairro ?? "",
+        cidade: data.cidade ?? "",
+        uf: data.uf ?? "",
+      });
       setTelefoneBarbearia(data.telefone ?? "");
     } finally {
       setCarregando(false);
@@ -54,7 +63,7 @@ export function EditarPerfilScreen() {
     if (!email.includes("@")) return setErro("Digite um e-mail válido.");
     if (telefone.replace(/\D/g, "").length < 8) return setErro("Digite um telefone pessoal válido com DDD.");
     if (!nomeBarbearia.trim()) return setErro("Digite o nome da barbearia.");
-    if (enderecoBarbearia.trim().length < 10) return setErro("Digite o endereço completo da barbearia.");
+    if (!enderecoValido(enderecoBarbearia)) return setErro("Digite o endereço completo da barbearia (CEP, rua, número, bairro e cidade).");
     if (telefoneBarbearia.replace(/\D/g, "").length < 8) return setErro("Digite um telefone da barbearia válido com DDD.");
 
     setSalvando(true);
@@ -67,7 +76,7 @@ export function EditarPerfilScreen() {
         }),
         api.patch(`/barbearias/${barbeariaId}`, {
           nome: nomeBarbearia.trim(),
-          endereco: enderecoBarbearia.trim(),
+          endereco: enderecoParaApi(enderecoBarbearia),
           telefone: telefoneBarbearia.trim(),
         }),
       ]);
@@ -127,15 +136,7 @@ export function EditarPerfilScreen() {
               <Text style={styles.label}>Nome da barbearia</Text>
               <TextInput value={nomeBarbearia} onChangeText={setNomeBarbearia} style={styles.input} placeholder="Nome da barbearia" />
             </View>
-            <View style={styles.field}>
-              <Text style={styles.label}>Endereço completo</Text>
-              <TextInput
-                value={enderecoBarbearia}
-                onChangeText={setEnderecoBarbearia}
-                style={styles.input}
-                placeholder="Rua, número, bairro, cidade - UF"
-              />
-            </View>
+            <EnderecoForm valores={enderecoBarbearia} onChange={setEnderecoBarbearia} />
             <View style={styles.field}>
               <Text style={styles.label}>Telefone da barbearia</Text>
               <TextInput
