@@ -42,9 +42,13 @@ enum OrigemAgendamento {
 enum MetodoPagamento {
   PIX
   CARTAO
-  // Pago por fora, na mão/maquininha da própria barbearia — só existe em
-  // Agendamento.metodoPagamentoManual (lançamento manual), nunca em Pagamento
-  // (que representa sempre uma cobrança de verdade pelo Mercado Pago).
+  // Dinheiro na mão: tanto em Agendamento.metodoPagamentoManual (lançamento
+  // manual da barbearia, sem Pagamento nenhum) quanto num Pagamento de
+  // verdade (agendamento feito pelo cliente no app escolhendo pagar em
+  // dinheiro) — nesse segundo caso o Pagamento nasce PENDENTE e só vira
+  // APROVADO quando o funcionário/barbearia confirmam o recebimento
+  // presencial (ver AgendamentosService.confirmarPagamentoDinheiro). Nunca
+  // passa pelo Mercado Pago em nenhum dos dois casos.
   DINHEIRO
 }
 

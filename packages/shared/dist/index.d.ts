@@ -185,6 +185,10 @@ export interface Agendamento {
         longitude?: number | null;
         telefone?: string | null;
     } | null;
+    pagamento?: {
+        metodo: MetodoPagamento;
+        status: StatusPagamento;
+    } | null;
 }
 export interface AgendamentoLoteCriado {
     agendamentos: Agendamento[];

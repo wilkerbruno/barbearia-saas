@@ -267,7 +267,13 @@ export function BookingScreen({ route, navigation }: Props) {
         metodoPagamento: usandoPacote ? undefined : (formaPagamento as MetodoPagamento),
         usarAssinaturaPacoteId: usandoPacote ? assinaturaElegivel.id : undefined,
       });
-      if (data.pagamento) {
+      if (formaPagamento === MetodoPagamento.DINHEIRO) {
+        // Já nasce CONFIRMADO (ver AgendamentosService.criarLote) — não tem
+        // QR/cobrança pra mostrar, então pula a PagamentoScreen (que é só pra
+        // Pix/Cartão) e confirma direto, igual ao fluxo de pacote mensal.
+        alertar("Agendamento confirmado!", "Pague em dinheiro direto na barbearia, na hora do atendimento.");
+        navigation.navigate("Home");
+      } else if (data.pagamento) {
         navigation.replace("Pagamento", { pagamento: data.pagamento, aviso: data.aviso });
       } else {
         alertar("Agendamento confirmado!", "Reservado usando a cota do seu pacote mensal.");
@@ -458,6 +464,7 @@ export function BookingScreen({ route, navigation }: Props) {
                 [
                   { valor: MetodoPagamento.PIX as FormaPagamento, label: "Pix" },
                   { valor: MetodoPagamento.CARTAO as FormaPagamento, label: "Cartão" },
+                  { valor: MetodoPagamento.DINHEIRO as FormaPagamento, label: "Dinheiro" },
                   ...(assinaturaElegivel ? [{ valor: "PACOTE" as FormaPagamento, label: "Pacote mensal" }] : []),
                 ]
               ).map((opcao) => {
@@ -477,6 +484,11 @@ export function BookingScreen({ route, navigation }: Props) {
                 restantes essa semana no seu pacote — sem cobrança avulsa.
               </Text>
             )}
+            {formaPagamento === MetodoPagamento.DINHEIRO && (
+              <Text style={styles.hint}>
+                Seu horário já fica reservado. Pague em dinheiro direto na barbearia, na hora do atendimento.
+              </Text>
+            )}
 
             <Card style={styles.avisoCard}>
               <Text style={styles.avisoTexto}>
@@ -488,7 +500,7 @@ export function BookingScreen({ route, navigation }: Props) {
 
             <Button
               label={
-                formaPagamento === "PACOTE"
+                formaPagamento === "PACOTE" || formaPagamento === MetodoPagamento.DINHEIRO
                   ? "Confirmar agendamento"
                   : formaPagamento === MetodoPagamento.CARTAO
                     ? "Continuar para pagamento"

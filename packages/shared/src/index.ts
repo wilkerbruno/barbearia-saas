@@ -287,6 +287,13 @@ export interface Agendamento {
   // barbearias, diferente da agenda do funcionário/dono, que já sabe qual é
   // a própria barbearia) — usado pra mostrar o nome e o botão "Como chegar".
   barbearia?: { id: string; nome: string; endereco?: string | null; latitude?: number | null; longitude?: number | null; telefone?: string | null } | null;
+  // Só vem populado na agenda do funcionário/barbearia (ver
+  // AgendamentosService.listarAgendaFuncionario/listarAgendaBarbearia) —
+  // metodo/status do Pagamento ligado pelo grupoId. É o que a tela usa pra
+  // saber quando mostrar "Marcar como pago" (metodo DINHEIRO ainda PENDENTE).
+  // null quando não veio do app (lançamento manual) ou foi coberto por cota
+  // de pacote mensal (sem Pagamento nenhum).
+  pagamento?: { metodo: MetodoPagamento; status: StatusPagamento } | null;
 }
 
 // Retorno de POST /agendamentos/lote (e POST /agendamentos, que por baixo faz
@@ -358,8 +365,12 @@ export interface CriarAgendamentoManualInput {
 export const MetodoPagamento = {
   PIX: "PIX",
   CARTAO: "CARTAO",
-  // Só usado em lançamento manual (ver CriarAgendamentoManualInput) — nunca
-  // num Pagamento de verdade (que sempre veio do Mercado Pago).
+  // Usado tanto em lançamento manual (CriarAgendamentoManualInput, sem
+  // Pagamento nenhum) quanto em agendamento feito pelo cliente no app
+  // (CriarAgendamentoLoteInput) — nesse segundo caso cria um Pagamento de
+  // verdade, só que PENDENTE até o funcionário/barbearia confirmarem o
+  // recebimento presencial (nunca passa pelo Mercado Pago, ver
+  // AgendamentosService.confirmarPagamentoDinheiro).
   DINHEIRO: "DINHEIRO",
 } as const;
 export type MetodoPagamento = (typeof MetodoPagamento)[keyof typeof MetodoPagamento];

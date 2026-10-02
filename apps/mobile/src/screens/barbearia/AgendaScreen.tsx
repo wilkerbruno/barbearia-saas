@@ -4,7 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { Agendamento, FuncionarioDetalhado, StatusAgendamento } from "@barbearia-saas/shared";
+import { Agendamento, FuncionarioDetalhado, MetodoPagamento, StatusAgendamento, StatusPagamento } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Card } from "../../components/Card";
 import { PriceTag } from "../../components/PriceTag";
@@ -59,6 +59,11 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
 
   async function marcarNaoCompareceu(id: string) {
     await api.patch(`/agendamentos/${id}/nao-compareceu`);
+    carregar();
+  }
+
+  async function marcarComoPago(id: string) {
+    await api.patch(`/agendamentos/${id}/confirmar-pagamento-dinheiro`);
     carregar();
   }
 
@@ -139,6 +144,9 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
               )}
             </View>
             {item.assinaturaPacoteId ? <Text style={styles.pacoteMensal}>Pacote mensal</Text> : null}
+            {item.pagamento?.metodo === MetodoPagamento.DINHEIRO && item.pagamento.status === StatusPagamento.PENDENTE ? (
+              <Text style={styles.dinheiroPendente}>Dinheiro — aguardando pagamento no local</Text>
+            ) : null}
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <PriceTag centavos={item.precoCentavos} />
               {item.status === StatusAgendamento.CONFIRMADO && (
@@ -146,9 +154,15 @@ export function BarbeariaAgendaScreen({ navigation }: Props) {
                   <Text style={styles.naoCompareceu} onPress={() => marcarNaoCompareceu(item.id)}>
                     Não compareceu
                   </Text>
-                  <Text style={styles.concluir} onPress={() => concluir(item.id)}>
-                    Marcar concluído
-                  </Text>
+                  {item.pagamento?.metodo === MetodoPagamento.DINHEIRO && item.pagamento.status === StatusPagamento.PENDENTE ? (
+                    <Text style={styles.marcarPago} onPress={() => marcarComoPago(item.id)}>
+                      Marcar como pago
+                    </Text>
+                  ) : (
+                    <Text style={styles.concluir} onPress={() => concluir(item.id)}>
+                      Marcar concluído
+                    </Text>
+                  )}
                 </View>
               )}
             </View>
@@ -199,6 +213,8 @@ const styles = StyleSheet.create({
   naoCompareceu: { color: colors.danger, fontWeight: "700", fontSize: 12 },
   concluir: { color: colors.accent, fontWeight: "700", fontSize: 12 },
   pacoteMensal: { fontSize: 11, fontWeight: "700", color: colors.accent },
+  dinheiroPendente: { fontSize: 11, fontWeight: "700", color: colors.danger },
+  marcarPago: { color: colors.accent, fontWeight: "700", fontSize: 12 },
   ligarCliente: { flexDirection: "row", alignItems: "center", gap: 4 },
   ligarClienteTexto: { fontSize: 12, fontWeight: "700", color: colors.accent },
 });

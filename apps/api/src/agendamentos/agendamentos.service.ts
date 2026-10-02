@@ -130,9 +130,16 @@ export class AgendamentosService {
       return this.criarComAssinaturaPacote(clienteId, barbeariaId, funcionarioId, resolvidos, inicio, assinaturaPacote.id);
     }
 
+    const metodoPagamento = dto.metodoPagamento ?? MetodoPagamento.PIX;
+    const valorTotalCentavos = resolvidos.reduce((total, r) => total + r.precoCentavos, 0);
+
     // Confere ANTES de criar qualquer coisa que a barbearia tem como receber
-    // — evita reservar o horário só pra descobrir depois que não dá pra cobrar.
-    const tokenBarbearia = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
+    // — evita reservar o horário só pra descobrir depois que não dá pra
+    // cobrar. Dinheiro nunca passa pelo Mercado Pago, então pula essa
+    // exigência de propósito: a barbearia pode aceitar pagamento em dinheiro
+    // mesmo sem ter conectado uma conta Mercado Pago ainda.
+    const tokenBarbearia =
+      metodoPagamento === MetodoPagamento.DINHEIRO ? null : await this.mercadoPago.tokenDaBarbearia(barbeariaId);
 
     const [cliente, barbearia, ultimoPagamentoAprovado] = await Promise.all([
       this.prisma.usuario.findUnique({ where: { id: clienteId } }),
@@ -150,9 +157,6 @@ export class AgendamentosService {
     ]);
     if (!cliente) throw new NotFoundException("Cliente não encontrado.");
 
-    const metodoPagamento = dto.metodoPagamento ?? MetodoPagamento.PIX;
-    const valorTotalCentavos = resolvidos.reduce((total, r) => total + r.precoCentavos, 0);
-
     const grupoId = randomUUID();
     let cursor = inicio;
     const dadosParaCriar = resolvidos.map((item) => {
@@ -168,7 +172,17 @@ export class AgendamentosService {
         inicio: inicioItem,
         fim: fimItem,
         precoCentavos: item.precoCentavos,
-        status: StatusAgendamento.PENDENTE,
+        // Pix/Cartão nascem PENDENTE até o gateway confirmar (ver mais
+        // abaixo) — mas Dinheiro nasce CONFIRMADO direto: diferente de um
+        // checkout abandonado, aqui o cliente já se comprometeu com o
+        // horário, e um PENDENTE expira sozinho depois de
+        // PENDENTE_EXPIRA_MINUTOS (ver filtroStatusAtivo), o que liberaria a
+        // vaga de baixo do cliente que ainda vai aparecer pra pagar em
+        // dinheiro. O controle de "ainda não pagou" fica só no Pagamento
+        // (criado abaixo como PENDENTE) até o funcionário/barbearia
+        // confirmarem o recebimento — ver confirmarPagamentoDinheiro.
+        status:
+          metodoPagamento === MetodoPagamento.DINHEIRO ? StatusAgendamento.CONFIRMADO : StatusAgendamento.PENDENTE,
         origem: OrigemAgendamento.CLIENTE_APP,
         grupoId,
       };
@@ -195,7 +209,7 @@ export class AgendamentosService {
             externalReference: `agendamento_${pagamento.id}`,
             payerEmail: cliente.email,
           },
-          tokenBarbearia,
+          tokenBarbearia as string,
         );
         const aprovadoNaHora = pix.status === "approved";
         await this.prisma.pagamento.update({
@@ -210,7 +224,7 @@ export class AgendamentosService {
         if (aprovadoNaHora) {
           await this.prisma.agendamento.updateMany({ where: { grupoId }, data: { status: StatusAgendamento.CONFIRMADO } });
         }
-      } else {
+      } else if (metodoPagamento === MetodoPagamento.CARTAO) {
         // Cartão: formulário nativo no app tokenizou o cartão (dto.cartaoToken)
         // e o cliente nunca sai do app — cobra na hora, sem checkout hospedado.
         if (!dto.cartaoToken || !dto.cartaoBin || !dto.cartaoCpf) {
@@ -240,7 +254,7 @@ export class AgendamentosService {
             payerUltimaCompraEm: ultimoPagamentoAprovado?.atualizadoEm ?? null,
             dataAgendamento: inicio,
           },
-          tokenBarbearia,
+          tokenBarbearia as string,
         );
         const aprovadoNaHora = cobranca.status === "approved";
         const recusado = cobranca.status === "rejected";
@@ -265,6 +279,12 @@ export class AgendamentosService {
           motivoRecusaCartao = traduzirMotivoRecusaCartao(cobranca.statusDetail);
         }
       }
+      // DINHEIRO: nada a fazer aqui — o Agendamento já nasceu CONFIRMADO e o
+      // Pagamento já foi criado acima como PENDENTE, sem gatewayPagamentoId.
+      // Fica assim até o funcionário/barbearia confirmarem o recebimento
+      // presencialmente (ver confirmarPagamentoDinheiro), o que também é o
+      // que libera `concluir()` pra esse agendamento (exige Pagamento
+      // APROVADO pra agendamentos vindos do app).
     } catch (e) {
       // Não deixa a reserva/pagamento órfãos travando o horário pra sempre —
       // desfaz os dois e devolve um erro claro pro cliente tentar de novo.
@@ -542,9 +562,17 @@ export class AgendamentosService {
     if (!pagamento || pagamento.clienteId !== clienteId) throw new NotFoundException("Pagamento não encontrado.");
 
     if (pagamento.status === StatusPagamento.PENDENTE && pagamento.grupoId) {
+      // Dinheiro nasce CONFIRMADO (não PENDENTE, ver criarLote) — se o
+      // cliente ainda assim desistir antes de confirmar em dinheiro, precisa
+      // soltar o CONFIRMADO também, senão o horário ficava preso com um
+      // Pagamento RECUSADO órfão (nunca mais confirmável nem concluível).
+      const statusParaLiberar =
+        pagamento.metodo === MetodoPagamento.DINHEIRO
+          ? [StatusAgendamento.PENDENTE, StatusAgendamento.CONFIRMADO]
+          : [StatusAgendamento.PENDENTE];
       await this.prisma.$transaction([
         this.prisma.agendamento.updateMany({
-          where: { grupoId: pagamento.grupoId, status: StatusAgendamento.PENDENTE },
+          where: { grupoId: pagamento.grupoId, status: { in: statusParaLiberar } },
           data: { status: StatusAgendamento.CANCELADO },
         }),
         this.prisma.pagamento.update({ where: { id: pagamentoId }, data: { status: StatusPagamento.RECUSADO } }),
@@ -723,7 +751,7 @@ export class AgendamentosService {
     const funcionario = await this.prisma.funcionario.findUnique({ where: { usuarioId } });
     if (!funcionario) throw new NotFoundException("Cadastro de funcionário não encontrado para este usuário.");
 
-    return this.prisma.agendamento.findMany({
+    const agendamentos = await this.prisma.agendamento.findMany({
       where: {
         funcionarioId: funcionario.id,
         status: { not: StatusAgendamento.CANCELADO },
@@ -735,11 +763,12 @@ export class AgendamentosService {
       include: { servico: true, pacote: true, cliente: { select: { id: true, nome: true, telefone: true } } },
       orderBy: { inicio: "asc" },
     });
+    return this.anexarPagamento(agendamentos);
   }
 
   // Agenda de toda a barbearia (usada pelo app do dono), com filtro opcional por funcionário.
-  listarAgendaBarbearia(barbeariaId: string, dataInicio?: Date, dataFim?: Date, funcionarioId?: string) {
-    return this.prisma.agendamento.findMany({
+  async listarAgendaBarbearia(barbeariaId: string, dataInicio?: Date, dataFim?: Date, funcionarioId?: string) {
+    const agendamentos = await this.prisma.agendamento.findMany({
       where: {
         barbeariaId,
         status: { not: StatusAgendamento.CANCELADO },
@@ -756,6 +785,37 @@ export class AgendamentosService {
         funcionario: { include: { usuario: { select: { id: true, nome: true } } } },
       },
       orderBy: { inicio: "asc" },
+    });
+    return this.anexarPagamento(agendamentos);
+  }
+
+  // Junta o metodo/status do Pagamento de cada agendamento vindo do app
+  // (ligado pelo grupoId, já que não é uma relação do Prisma — ver comentário
+  // no schema) — hoje só usado pra agenda do funcionário/barbearia saberem
+  // quando um agendamento está com Dinheiro ainda PENDENTE de confirmação
+  // (ver EquipeScreen/BarbeariaAgendaScreen, botão "Marcar como pago").
+  // Lançamento manual (sem grupoId) e agendamento coberto por pacote mensal
+  // (grupoId sem Pagamento nenhum) simplesmente não têm `pagamento` nenhum.
+  private async anexarPagamento<T extends { grupoId: string | null; origem: string }>(
+    agendamentos: T[],
+  ): Promise<(T & { pagamento: { metodo: string; status: string } | null })[]> {
+    const grupoIds = [
+      ...new Set(
+        agendamentos
+          .filter((a) => a.origem === OrigemAgendamento.CLIENTE_APP && a.grupoId)
+          .map((a) => a.grupoId as string),
+      ),
+    ];
+    if (grupoIds.length === 0) return agendamentos.map((a) => ({ ...a, pagamento: null }));
+
+    const pagamentos = await this.prisma.pagamento.findMany({
+      where: { grupoId: { in: grupoIds } },
+      select: { grupoId: true, metodo: true, status: true },
+    });
+    const porGrupo = new Map(pagamentos.map((p) => [p.grupoId as string, p]));
+    return agendamentos.map((a) => {
+      const pagamento = a.grupoId ? porGrupo.get(a.grupoId) : undefined;
+      return { ...a, pagamento: pagamento ? { metodo: pagamento.metodo, status: pagamento.status } : null };
     });
   }
 
@@ -790,6 +850,39 @@ export class AgendamentosService {
     }
 
     return this.prisma.agendamento.update({ where: { id }, data: { status: StatusAgendamento.CANCELADO } });
+  }
+
+  // Funcionário/dono confirma que recebeu o pagamento em dinheiro na mão do
+  // cliente, presencialmente — o agendamento já nasceu CONFIRMADO (ver
+  // criarLote), então isso só libera o Pagamento (PENDENTE -> APROVADO), que
+  // por sua vez é o que `concluir()` exige pra permitir marcar o atendimento
+  // como concluído/entrar no faturamento (ver FinanceiroService). Idempotente:
+  // chamar de novo num pagamento já confirmado não dá erro.
+  async confirmarPagamentoDinheiro(id: string, user: AuthUser) {
+    const agendamento = await this.prisma.agendamento.findUnique({ where: { id }, include: { funcionario: true } });
+    if (!agendamento) throw new NotFoundException("Agendamento não encontrado.");
+
+    const podeConfirmar =
+      (user.papel === Papel.FUNCIONARIO && agendamento.funcionario.usuarioId === user.id) ||
+      (user.papel === Papel.BARBEARIA_ADMIN && agendamento.barbeariaId === user.barbeariaId);
+    if (!podeConfirmar) throw new ForbiddenException("Você não pode confirmar o pagamento deste agendamento.");
+
+    if (agendamento.origem !== OrigemAgendamento.CLIENTE_APP || !agendamento.grupoId) {
+      throw new BadRequestException("Esse agendamento não tem uma cobrança em dinheiro pra confirmar.");
+    }
+    const pagamento = await this.prisma.pagamento.findFirst({ where: { grupoId: agendamento.grupoId } });
+    if (!pagamento || pagamento.metodo !== MetodoPagamento.DINHEIRO) {
+      throw new BadRequestException("Esse agendamento não está com pagamento em dinheiro.");
+    }
+    if (pagamento.status === StatusPagamento.RECUSADO || pagamento.status === StatusPagamento.ESTORNADO) {
+      throw new BadRequestException("Esse pagamento foi cancelado e não pode ser confirmado.");
+    }
+
+    if (pagamento.status !== StatusPagamento.APROVADO) {
+      await this.prisma.pagamento.update({ where: { id: pagamento.id }, data: { status: StatusPagamento.APROVADO } });
+    }
+
+    return this.prisma.agendamento.findMany({ where: { grupoId: agendamento.grupoId } });
   }
 
   // O funcionário marca o atendimento como concluído (entra no financeiro

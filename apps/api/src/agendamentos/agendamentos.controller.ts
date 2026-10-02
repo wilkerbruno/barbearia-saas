@@ -95,6 +95,14 @@ export class AgendamentosController {
     return this.agendamentosService.marcarNaoCompareceu(id, user);
   }
 
+  // Funcionário/dono confirma que recebeu o pagamento em dinheiro na mão do
+  // cliente, presencialmente. Ver AgendamentosService.confirmarPagamentoDinheiro.
+  @Roles(Papel.FUNCIONARIO, Papel.BARBEARIA_ADMIN)
+  @Patch(":id/confirmar-pagamento-dinheiro")
+  confirmarPagamentoDinheiro(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.agendamentosService.confirmarPagamentoDinheiro(id, user);
+  }
+
   private parseIntervaloDia(data?: string): { inicio?: Date; fim?: Date } {
     if (!data) return {};
     const inicio = new Date(`${data}T00:00:00`);

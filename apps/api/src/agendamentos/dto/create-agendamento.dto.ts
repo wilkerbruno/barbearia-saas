@@ -20,6 +20,6 @@ export class CreateAgendamentoDto {
   inicio: string;
 
   @IsOptional()
-  @IsIn([MetodoPagamento.PIX, MetodoPagamento.CARTAO])
+  @IsIn([MetodoPagamento.PIX, MetodoPagamento.CARTAO, MetodoPagamento.DINHEIRO])
   metodoPagamento?: MetodoPagamento;
 }

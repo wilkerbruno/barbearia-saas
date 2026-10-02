@@ -33,13 +33,16 @@ export class CreateAgendamentoLoteDto {
   @Type(() => ItemAgendamentoLoteDto)
   itens: ItemAgendamentoLoteDto[];
 
-  // Como pagar: Pix (padrão) ou Cartão via checkout do Mercado Pago — ver
-  // AgendamentosService.criarLote. A barbearia precisa ter conectado a
-  // própria conta Mercado Pago (Mais > Mercado Pago) pra qualquer um dos dois.
+  // Como pagar: Pix (padrão), Cartão via checkout do Mercado Pago, ou
+  // Dinheiro na hora do atendimento (ver AgendamentosService.criarLote) — Pix
+  // e Cartão exigem a barbearia ter conectado a própria conta Mercado Pago
+  // (Mais > Mercado Pago); Dinheiro não, já que nunca passa pelo gateway (o
+  // agendamento nasce CONFIRMADO direto e o funcionário/barbearia confirmam o
+  // recebimento depois — ver AgendamentosService.confirmarPagamentoDinheiro).
   // Ignorado quando o lote é coberto pela cota de um pacote mensal (ver
   // usarAssinaturaPacoteId abaixo).
   @IsOptional()
-  @IsIn([MetodoPagamento.PIX, MetodoPagamento.CARTAO])
+  @IsIn([MetodoPagamento.PIX, MetodoPagamento.CARTAO, MetodoPagamento.DINHEIRO])
   metodoPagamento?: MetodoPagamento;
 
   // Id de uma AssinaturaPacoteCliente ATIVA do cliente pra usar a cota do
