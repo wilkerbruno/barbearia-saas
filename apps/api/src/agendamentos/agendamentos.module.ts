@@ -3,13 +3,15 @@ import { AgendamentosController } from "./agendamentos.controller";
 import { AgendamentosService } from "./agendamentos.service";
 import { PagamentosModule } from "../pagamentos/pagamentos.module";
 import { ConfiguracoesModule } from "../configuracoes/configuracoes.module";
+import { PushModule } from "../push/push.module";
 
 @Module({
   // PagamentosModule pelo MercadoPagoService, usado pra cobrar o cliente na
   // conta da barbearia (Pix/Cartão) e pra estornar a multa de não comparecimento.
   // ConfiguracoesModule pra saber a carência configurada (ver
-  // garantirBarbeariaDisponivelParaAgendamento).
-  imports: [PagamentosModule, ConfiguracoesModule],
+  // garantirBarbeariaDisponivelParaAgendamento). PushModule pro lembrete de
+  // dinheiro pendente (ver avisarPagamentosDinheiroNoHorario).
+  imports: [PagamentosModule, ConfiguracoesModule, PushModule],
   controllers: [AgendamentosController],
   providers: [AgendamentosService],
   // BarbeariasModule usa isso para expor os endpoints de disponibilidade

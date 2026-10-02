@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { Cron, CronExpression } from "@nestjs/schedule";
 import { Funcionario, Folga, HorarioTrabalho } from "@prisma/client";
 import {
   AVISO_NAO_COMPARECIMENTO,
@@ -14,6 +15,7 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
 import { ConfiguracoesService } from "../configuracoes/configuracoes.service";
+import { PushService } from "../push/push.service";
 import { estaForaDaCarencia } from "../assinaturas/assinatura-status.util";
 import { CreateAgendamentoDto } from "./dto/create-agendamento.dto";
 import { CreateAgendamentoLoteDto } from "./dto/create-agendamento-lote.dto";
@@ -52,11 +54,19 @@ interface ItemResolvido {
 export class AgendamentosService {
   private readonly logger = new Logger(AgendamentosService.name);
 
+  // Marca até onde já checamos agendamentos pra avisar sobre dinheiro
+  // pendente (ver avisarPagamentosDinheiroNoHorario) — só em memória mesmo:
+  // se o servidor reiniciar, a próxima rodada volta 5 min pra não perder
+  // nenhum, e na pior hipótese algum agendamento recebe o aviso de novo
+  // (reenviar um lembrete não causa problema nenhum).
+  private ultimaChecagemLembreteDinheiro: Date | null = null;
+
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
     private mercadoPago: MercadoPagoService,
     private configuracoes: ConfiguracoesService,
+    private push: PushService,
   ) {}
 
   // Cliente não consegue criar um agendamento novo numa barbearia cuja
@@ -883,6 +893,59 @@ export class AgendamentosService {
     }
 
     return this.prisma.agendamento.findMany({ where: { grupoId: agendamento.grupoId } });
+  }
+
+  // Cron a cada minuto: avisa por push o funcionário responsável assim que
+  // chega o horário de um agendamento com Dinheiro ainda PENDENTE de
+  // confirmação — é a rede de segurança pedida pra evitar o cliente sair sem
+  // pagar (o funcionário recebe o lembrete bem na hora de atender, não só
+  // quando olhar a agenda). Um aviso só por grupo (mesmo quando o cliente
+  // marcou vários serviços juntos no mesmo horário).
+  @Cron(CronExpression.EVERY_MINUTE)
+  async avisarPagamentosDinheiroNoHorario() {
+    const agora = new Date();
+    // Janela curta: só o que passou a ser "hora de atender" desde a última
+    // checagem (ou os últimos 5 min, na primeira rodada depois de o servidor
+    // subir) — evita tanto perder agendamento quanto avisar o mesmo de novo
+    // a cada minuto.
+    const desde = this.ultimaChecagemLembreteDinheiro ?? new Date(agora.getTime() - 5 * 60_000);
+    this.ultimaChecagemLembreteDinheiro = agora;
+
+    const agendamentos = await this.prisma.agendamento.findMany({
+      where: {
+        origem: OrigemAgendamento.CLIENTE_APP,
+        status: StatusAgendamento.CONFIRMADO,
+        grupoId: { not: null },
+        inicio: { gt: desde, lte: agora },
+      },
+      include: {
+        funcionario: { include: { usuario: { select: { pushToken: true } } } },
+        cliente: { select: { nome: true } },
+      },
+    });
+    if (agendamentos.length === 0) return;
+
+    const grupoIds = [...new Set(agendamentos.map((a) => a.grupoId as string))];
+    const pagamentosDinheiroPendentes = await this.prisma.pagamento.findMany({
+      where: { grupoId: { in: grupoIds }, metodo: MetodoPagamento.DINHEIRO, status: StatusPagamento.PENDENTE },
+      select: { grupoId: true },
+    });
+    const gruposComDinheiroPendente = new Set(pagamentosDinheiroPendentes.map((p) => p.grupoId));
+
+    const jaAvisados = new Set<string>();
+    for (const a of agendamentos) {
+      const grupoId = a.grupoId as string;
+      if (!gruposComDinheiroPendente.has(grupoId) || jaAvisados.has(grupoId)) continue;
+      jaAvisados.add(grupoId);
+
+      const nomeCliente = a.cliente?.nome ?? a.clienteAvulsoNome ?? "O cliente";
+      await this.push.enviarParaTokens(
+        [a.funcionario.usuario.pushToken],
+        "Pagamento em dinheiro",
+        `${nomeCliente} vai pagar em dinheiro por este atendimento — confirme o recebimento no app assim que ele pagar, pra não esquecer.`,
+        { tipo: "PAGAMENTO_DINHEIRO_PENDENTE", agendamentoId: a.id },
+      );
+    }
   }
 
   // O funcionário marca o atendimento como concluído (entra no financeiro
