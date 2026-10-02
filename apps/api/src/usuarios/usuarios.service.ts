@@ -6,7 +6,19 @@ import { UpdateMeuPerfilDto } from "./dto/update-meu-perfil.dto";
 // Campos devolvidos depois de editar o perfil — mesmo formato do Usuario
 // "seguro" (sem senhaHash) usado em AuthService.login/registerCliente, pra o
 // app poder atualizar o authStore direto com a resposta.
-const SELECT_SEGURO = { id: true, nome: true, email: true, telefone: true, papel: true, barbeariaId: true, criadoEm: true };
+// Inclui `endereco` de propósito: esta constante SÓ é usada em respostas
+// "sobre mim mesmo" (login/registro/meu-perfil) — NUNCA pra expor o
+// usuário de outra pessoa. Ver comentário em Usuario.endereco no schema.
+const SELECT_SEGURO = {
+  id: true,
+  nome: true,
+  email: true,
+  telefone: true,
+  endereco: true,
+  papel: true,
+  barbeariaId: true,
+  criadoEm: true,
+};
 
 @Injectable()
 export class UsuariosService {
@@ -45,7 +57,7 @@ export class UsuariosService {
 
     return this.prisma.usuario.update({
       where: { id: usuarioId },
-      data: { nome: dto.nome, email: dto.email, telefone: dto.telefone },
+      data: { nome: dto.nome, email: dto.email, telefone: dto.telefone, endereco: dto.endereco },
       select: SELECT_SEGURO,
     });
   }

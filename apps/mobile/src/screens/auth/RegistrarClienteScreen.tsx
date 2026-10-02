@@ -12,6 +12,7 @@ export function RegistrarClienteScreen() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [telefone, setTelefone] = useState("");
+  const [endereco, setEndereco] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(false);
   const entrar = useAuthStore((s) => s.entrar);
@@ -22,9 +23,13 @@ export function RegistrarClienteScreen() {
       setErro("Informe um telefone válido com DDD.");
       return;
     }
+    if (endereco.trim().length < 10) {
+      setErro("Informe seu endereço completo (rua, número, bairro e cidade).");
+      return;
+    }
     setCarregando(true);
     try {
-      const { data } = await api.post("/auth/registrar-cliente", { nome, email, senha, telefone });
+      const { data } = await api.post("/auth/registrar-cliente", { nome, email, senha, telefone, endereco });
       await entrar(data.accessToken, data.usuario);
     } catch (e: any) {
       setErro(e?.response?.data?.message ?? "Não foi possível criar a conta.");
@@ -75,6 +80,15 @@ export function RegistrarClienteScreen() {
               keyboardType="phone-pad"
               style={styles.input}
               placeholder="(11) 91234-5678"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Endereço completo</Text>
+            <TextInput
+              value={endereco}
+              onChangeText={setEndereco}
+              style={styles.input}
+              placeholder="Rua, número, bairro, cidade - UF"
             />
           </View>
 

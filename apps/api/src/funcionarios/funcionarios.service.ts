@@ -41,6 +41,13 @@ export class FuncionariosService {
           email: dto.email,
           senhaHash,
           telefone: dto.telefone,
+          // Endereço do funcionário (obrigatório no cadastro). ATENÇÃO:
+          // nunca incluir `endereco` nos `select`/`include` de usuario
+          // feitos a partir daqui (listarDaBarbearia, o retorno deste
+          // método, atualizar) — o dono da barbearia nunca pode ver o
+          // endereço do funcionário, só o próprio funcionário (via
+          // "meu-perfil", que usa SELECT_SEGURO em UsuariosService).
+          endereco: dto.endereco,
           papel: Papel.FUNCIONARIO,
           barbeariaId,
         },

@@ -54,6 +54,7 @@ export function EditarPerfilScreen() {
     if (!email.includes("@")) return setErro("Digite um e-mail válido.");
     if (telefone.replace(/\D/g, "").length < 8) return setErro("Digite um telefone pessoal válido com DDD.");
     if (!nomeBarbearia.trim()) return setErro("Digite o nome da barbearia.");
+    if (enderecoBarbearia.trim().length < 10) return setErro("Digite o endereço completo da barbearia.");
     if (telefoneBarbearia.replace(/\D/g, "").length < 8) return setErro("Digite um telefone da barbearia válido com DDD.");
 
     setSalvando(true);
@@ -66,7 +67,7 @@ export function EditarPerfilScreen() {
         }),
         api.patch(`/barbearias/${barbeariaId}`, {
           nome: nomeBarbearia.trim(),
-          endereco: enderecoBarbearia.trim() || undefined,
+          endereco: enderecoBarbearia.trim(),
           telefone: telefoneBarbearia.trim(),
         }),
       ]);
@@ -127,12 +128,12 @@ export function EditarPerfilScreen() {
               <TextInput value={nomeBarbearia} onChangeText={setNomeBarbearia} style={styles.input} placeholder="Nome da barbearia" />
             </View>
             <View style={styles.field}>
-              <Text style={styles.label}>Endereço</Text>
+              <Text style={styles.label}>Endereço completo</Text>
               <TextInput
                 value={enderecoBarbearia}
                 onChangeText={setEnderecoBarbearia}
                 style={styles.input}
-                placeholder="Rua, número, bairro"
+                placeholder="Rua, número, bairro, cidade - UF"
               />
             </View>
             <View style={styles.field}>

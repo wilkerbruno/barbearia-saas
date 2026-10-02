@@ -17,4 +17,12 @@ export class RegisterClienteDto {
   @IsString()
   @MinLength(8)
   telefone: string;
+
+  // Endereço completo do cliente — nunca é devolvido pra barbearia/funcionário
+  // (ver comentário em Usuario.endereco no schema e SELECT_SEGURO em
+  // UsuariosService; os selects usados por FuncionariosService/AgendamentosService
+  // pra mostrar o cliente pra barbearia nunca incluem este campo).
+  @IsString()
+  @MinLength(10)
+  endereco: string;
 }

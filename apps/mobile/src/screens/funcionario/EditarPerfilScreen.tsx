@@ -16,6 +16,7 @@ export function EditarPerfilScreen() {
 
   const [nome, setNome] = useState(usuario?.nome ?? "");
   const [email, setEmail] = useState(usuario?.email ?? "");
+  const [endereco, setEndereco] = useState(usuario?.endereco ?? "");
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -25,12 +26,14 @@ export function EditarPerfilScreen() {
     setSucesso(false);
     if (!nome.trim()) return setErro("Digite seu nome.");
     if (!email.includes("@")) return setErro("Digite um e-mail válido.");
+    if (endereco.trim().length < 10) return setErro("Digite seu endereço completo.");
 
     setSalvando(true);
     try {
       const { data } = await api.patch("/usuarios/meu-perfil", {
         nome: nome.trim(),
         email: email.trim().toLowerCase(),
+        endereco: endereco.trim(),
       });
       await atualizarUsuario(data);
       setSucesso(true);
@@ -60,6 +63,18 @@ export function EditarPerfilScreen() {
               placeholder="voce@email.com"
             />
           </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Endereço completo</Text>
+            <TextInput
+              value={endereco}
+              onChangeText={setEndereco}
+              style={styles.input}
+              placeholder="Rua, número, bairro, cidade - UF"
+            />
+          </View>
+          <Text style={styles.hint}>
+            Seu endereço é privado: a barbearia não tem acesso a esse dado, só você.
+          </Text>
           <Text style={styles.hint}>
             Seu telefone é cadastrado pela barbearia e só pode ser alterado por ela.
           </Text>

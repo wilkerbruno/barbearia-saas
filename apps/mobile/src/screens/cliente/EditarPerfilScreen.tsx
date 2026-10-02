@@ -17,6 +17,7 @@ export function EditarPerfilScreen() {
   const [nome, setNome] = useState(usuario?.nome ?? "");
   const [email, setEmail] = useState(usuario?.email ?? "");
   const [telefone, setTelefone] = useState(usuario?.telefone ?? "");
+  const [endereco, setEndereco] = useState(usuario?.endereco ?? "");
   const [erro, setErro] = useState<string | null>(null);
   const [sucesso, setSucesso] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -27,6 +28,7 @@ export function EditarPerfilScreen() {
     if (!nome.trim()) return setErro("Digite seu nome.");
     if (!email.includes("@")) return setErro("Digite um e-mail válido.");
     if (telefone.replace(/\D/g, "").length < 8) return setErro("Digite um telefone válido com DDD.");
+    if (endereco.trim().length < 10) return setErro("Digite seu endereço completo.");
 
     setSalvando(true);
     try {
@@ -34,6 +36,7 @@ export function EditarPerfilScreen() {
         nome: nome.trim(),
         email: email.trim().toLowerCase(),
         telefone: telefone.trim(),
+        endereco: endereco.trim(),
       });
       await atualizarUsuario(data);
       setSucesso(true);
@@ -71,6 +74,15 @@ export function EditarPerfilScreen() {
               keyboardType="phone-pad"
               style={styles.input}
               placeholder="(11) 91234-5678"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Endereço completo</Text>
+            <TextInput
+              value={endereco}
+              onChangeText={setEndereco}
+              style={styles.input}
+              placeholder="Rua, número, bairro, cidade - UF"
             />
           </View>
 

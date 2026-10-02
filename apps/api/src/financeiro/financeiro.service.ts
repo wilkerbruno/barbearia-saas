@@ -81,7 +81,14 @@ export class FinanceiroService {
         where: { barbeariaId, status: { in: [StatusAgendamento.CONCLUIDO, StatusAgendamento.NAO_COMPARECEU] }, inicio: { gte: inicio, lte: fim } },
         include: { servico: true, pacote: true },
       }),
-      this.prisma.funcionario.findMany({ where: { barbeariaId }, include: { usuario: true } }),
+      // Só .nome é usado abaixo (porFuncionario) — select explícito em vez de
+      // include genérico pra nunca puxar telefone/endereco do funcionário pra
+      // esse resumo financeiro (que é só números, não devia nem ter esses dados
+      // na memória do processo).
+      this.prisma.funcionario.findMany({
+        where: { barbeariaId },
+        include: { usuario: { select: { id: true, nome: true } } },
+      }),
     ]);
     const agendamentos = todos.filter((a) => a.status === StatusAgendamento.CONCLUIDO);
     const multasCentavos = todos

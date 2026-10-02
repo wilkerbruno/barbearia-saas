@@ -18,4 +18,14 @@ export class UpdateMeuPerfilDto {
   @IsString()
   @MinLength(8)
   telefone?: string;
+
+  // CLIENTE e FUNCIONARIO editam o próprio endereço por aqui (é obrigatório
+  // só no cadastro — ver RegisterClienteDto/CreateFuncionarioDto; depois de
+  // criada a conta, dá pra corrigir/completar à vontade). BARBEARIA_ADMIN não
+  // usa este campo (o endereço que importa pra ele é o da Barbearia, editado
+  // em PATCH /barbearias/:id).
+  @IsOptional()
+  @IsString()
+  @MinLength(10)
+  endereco?: string;
 }

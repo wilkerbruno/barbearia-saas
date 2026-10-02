@@ -15,7 +15,7 @@ import { MaisStackParamList } from "../../navigation/MaisStack";
 
 type Props = NativeStackScreenProps<MaisStackParamList, "Equipe">;
 
-const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", telefone: "", cargo: "", comissaoPercentual: "60" };
+const FUNCIONARIO_VAZIO = { nome: "", email: "", senha: "", telefone: "", endereco: "", cargo: "", comissaoPercentual: "60" };
 
 interface Assinatura {
   plano: { nome: string; limiteFuncionarios: number | null };
@@ -77,7 +77,12 @@ export function EquipeScreen({ navigation }: Props) {
       return alertar("Telefone inválido", "Digite um telefone válido com DDD, ou deixe em branco.");
     }
 
-    const dto = { nome, email, senha, telefone, cargo: campos.cargo.trim() || undefined, comissaoPercentual };
+    const endereco = campos.endereco.trim();
+    if (endereco.length < 10) {
+      return alertar("Endereço obrigatório", "Digite o endereço completo do funcionário (rua, número, bairro, cidade).");
+    }
+
+    const dto = { nome, email, senha, telefone, endereco, cargo: campos.cargo.trim() || undefined, comissaoPercentual };
     setSalvando(true);
     try {
       await api.post("/funcionarios", dto);
@@ -176,6 +181,16 @@ export function EquipeScreen({ navigation }: Props) {
                 keyboardType="phone-pad"
                 style={styles.input}
               />
+              <TextInput
+                value={campos.endereco}
+                onChangeText={(endereco) => setCampos((c) => ({ ...c, endereco }))}
+                placeholder="Endereço completo do funcionário"
+                placeholderTextColor={colors.inkMuted}
+                style={styles.input}
+              />
+              <Text style={styles.hint}>
+                O endereço é só do funcionário: depois de cadastrado, só ele vê ou edita esse dado (em "Perfil").
+              </Text>
               <View style={{ flexDirection: "row", gap: spacing.sm }}>
                 <TextInput
                   value={campos.cargo}

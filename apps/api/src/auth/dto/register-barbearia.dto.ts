@@ -23,6 +23,14 @@ export class RegisterBarbeariaDto {
   @MinLength(8)
   telefone: string;
 
+  // Endereço completo do ESTABELECIMENTO (Barbearia.endereco) — diferente da
+  // localização por GPS (latitude/longitude, capturada depois em "Mais >
+  // Localização"). Visível pro cliente (é o endereço que ele usa pra achar a
+  // barbearia), ver SELECT_PUBLICO em BarbeariasService.
+  @IsString()
+  @MinLength(10)
+  endereco: string;
+
   @IsString()
   planoId: string;
 }

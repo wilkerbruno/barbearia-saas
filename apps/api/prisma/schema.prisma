@@ -160,6 +160,21 @@ model Usuario {
   email        String    @unique
   senhaHash    String
   telefone     String?
+  // Endereço completo (rua, número, bairro, cidade, UF, CEP tudo num campo
+  // só — mesmo estilo do Barbearia.endereco acima). Obrigatório no cadastro
+  // de CLIENTE (RegisterClienteDto) e de FUNCIONARIO (CreateFuncionarioDto);
+  // nullable aqui só pra não quebrar usuários criados antes dessa coluna
+  // existir, e porque BARBEARIA_ADMIN/SAAS_ADMIN não preenchem este campo
+  // (o endereço que importa pro dono é o da própria Barbearia, acima).
+  // ATENÇÃO (privacidade): o endereço do CLIENTE nunca pode ser devolvido
+  // pela API pra BARBEARIA_ADMIN/FUNCIONARIO, e o endereço do FUNCIONARIO
+  // nunca pode ser devolvido pra CLIENTE nem (apesar de ele ter cadastrado)
+  // reexposto depois pro BARBEARIA_ADMIN — só SELECT_SEGURO (usuarios.service.ts,
+  // usado só em "meu-perfil", sempre o próprio usuário) inclui este campo.
+  // Nunca adicione `endereco` nos selects de FuncionariosService nem em
+  // qualquer select de `cliente`/`usuario` feito a partir de Agendamento,
+  // Avaliacao, Funcionario etc.
+  endereco     String?
   papel        Papel
   barbeariaId  String?
   barbearia    Barbearia? @relation(fields: [barbeariaId], references: [id])

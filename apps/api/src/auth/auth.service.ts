@@ -59,6 +59,7 @@ export class AuthService {
         email: dto.email,
         senhaHash,
         telefone: dto.telefone,
+        endereco: dto.endereco,
         papel: Papel.CLIENTE,
       },
     });
@@ -88,11 +89,12 @@ export class AuthService {
 
     const resultado = await this.prisma.$transaction(async (tx) => {
       const barbearia = await tx.barbearia.create({
-        // Telefone pra começar já preenchido com o informado no cadastro —
-        // é o que o cliente vê no botão "Ligar para a barbearia". O dono
-        // pode trocar depois sem afetar o telefone pessoal dele (Mais >
-        // dados da barbearia, se/quando essa tela existir).
-        data: { nome: dto.nomeBarbearia, slug, telefone: dto.telefone },
+        // Telefone e endereço pra começar já preenchidos com o informado no
+        // cadastro — é o que o cliente vê no botão "Ligar para a barbearia"
+        // e no endereço do estabelecimento. O dono pode trocar depois em
+        // Mais > Editar perfil > Dados da barbearia (EditarPerfilScreen),
+        // sem afetar os dados pessoais dele.
+        data: { nome: dto.nomeBarbearia, slug, telefone: dto.telefone, endereco: dto.endereco },
       });
 
       const dono = await tx.usuario.create({

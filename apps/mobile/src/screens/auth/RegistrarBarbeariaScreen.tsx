@@ -21,6 +21,7 @@ export function RegistrarBarbeariaScreen() {
   const [email, setEmail] = useState("");
   const [senha, setSenha] = useState("");
   const [telefone, setTelefone] = useState("");
+  const [endereco, setEndereco] = useState("");
   const [planos, setPlanos] = useState<Plano[]>([]);
   const [planoId, setPlanoId] = useState<string | null>(null);
   const [logo, setLogo] = useState<ImagePicker.ImagePickerAsset | null>(null);
@@ -83,6 +84,10 @@ export function RegistrarBarbeariaScreen() {
       setErro("Informe um telefone válido com DDD.");
       return;
     }
+    if (endereco.trim().length < 10) {
+      setErro("Informe o endereço completo da barbearia.");
+      return;
+    }
     setErro(null);
     setCarregando(true);
     try {
@@ -92,6 +97,7 @@ export function RegistrarBarbeariaScreen() {
         email,
         senha,
         telefone,
+        endereco,
         planoId,
       });
       await enviarLogoSeHouver(data.barbearia.id);
@@ -167,6 +173,15 @@ export function RegistrarBarbeariaScreen() {
               keyboardType="phone-pad"
               style={styles.input}
               placeholder="(11) 91234-5678"
+            />
+          </View>
+          <View style={styles.field}>
+            <Text style={styles.label}>Endereço completo da barbearia</Text>
+            <TextInput
+              value={endereco}
+              onChangeText={setEndereco}
+              style={styles.input}
+              placeholder="Rua, número, bairro, cidade - UF"
             />
           </View>
 

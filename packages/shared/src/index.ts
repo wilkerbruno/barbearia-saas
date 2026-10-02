@@ -27,6 +27,14 @@ export interface Usuario {
   nome: string;
   email: string;
   telefone?: string | null;
+  // Endereço completo (obrigatório no cadastro de CLIENTE/FUNCIONARIO).
+  // ATENÇÃO (privacidade): este tipo é só para a visão "meu-perfil" (o
+  // próprio usuário vendo os próprios dados) — nunca reutilize `Usuario`
+  // para representar como um FUNCIONARIO aparece pra um CLIENTE, ou como um
+  // CLIENTE aparece pra uma BARBEARIA/FUNCIONARIO. Esses casos têm seus
+  // próprios tipos restritos (ver FuncionarioPublico, FuncionarioDetalhado)
+  // que não incluem e não devem incluir este campo.
+  endereco?: string | null;
   papel: Papel;
   barbeariaId?: string | null; // null para CLIENTE (pode agendar em várias) e SAAS_ADMIN
   criadoEm: string;

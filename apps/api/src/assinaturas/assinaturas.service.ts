@@ -25,6 +25,24 @@ function mapearStatusFatura(statusPagamento: string | null | undefined): StatusF
   return StatusFatura.ATRASADA; // rejected, cancelled, refunded, charged_back, etc.
 }
 
+// Campos da Barbearia seguros para o painel SaaS (SAAS_ADMIN). NUNCA inclua
+// mercadoPagoAccessToken/mercadoPagoRefreshToken aqui nem troque isso por um
+// `include: { barbearia: true }` genérico — ver o comentário no schema
+// (model Barbearia) que já avisa: esses dois campos só podem sair por um
+// select explícito, nunca por include genérico.
+const SELECT_BARBEARIA_ADMIN = {
+  id: true,
+  nome: true,
+  slug: true,
+  endereco: true,
+  telefone: true,
+  logoUrl: true,
+  criadoEm: true,
+  mercadoPagoUserId: true,
+  mercadoPagoPublicKey: true,
+  mercadoPagoConectadoEm: true,
+} as const;
+
 @Injectable()
 export class AssinaturasService {
   private readonly logger = new Logger(AssinaturasService.name);
@@ -256,14 +274,14 @@ export class AssinaturasService {
   // Painel SaaS: visão geral de todas as assinaturas + faturamento recorrente.
   listarTodas() {
     return this.prisma.assinatura.findMany({
-      include: { plano: true, barbearia: true, faturas: { orderBy: { vencimentoEm: "desc" }, take: 1 } },
+      include: { plano: true, barbearia: { select: SELECT_BARBEARIA_ADMIN }, faturas: { orderBy: { vencimentoEm: "desc" }, take: 1 } },
       orderBy: { inicioEm: "desc" },
     });
   }
 
   listarFaturas() {
     return this.prisma.fatura.findMany({
-      include: { assinatura: { include: { barbearia: true, plano: true } } },
+      include: { assinatura: { include: { barbearia: { select: SELECT_BARBEARIA_ADMIN }, plano: true } } },
       orderBy: { vencimentoEm: "desc" },
       take: 200,
     });

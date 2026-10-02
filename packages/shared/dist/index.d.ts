@@ -10,6 +10,7 @@ export interface Usuario {
     nome: string;
     email: string;
     telefone?: string | null;
+    endereco?: string | null;
     papel: Papel;
     barbeariaId?: string | null;
     criadoEm: string;
