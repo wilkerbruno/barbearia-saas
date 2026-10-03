@@ -14,6 +14,7 @@ import { LocalizacaoScreen } from "../screens/barbearia/LocalizacaoScreen";
 import { LogoScreen } from "../screens/barbearia/LogoScreen";
 import { ConectarMercadoPagoScreen } from "../screens/barbearia/ConectarMercadoPagoScreen";
 import { EditarPerfilScreen } from "../screens/barbearia/EditarPerfilScreen";
+import { QrCodeScreen } from "../screens/barbearia/QrCodeScreen";
 import { SuporteScreen } from "../screens/shared/SuporteScreen";
 import { darkStackScreenOptions } from "./stackHeaderOptions";
 
@@ -36,6 +37,8 @@ export type MaisStackParamList = {
   Logo: undefined;
   MercadoPago: undefined;
   EditarPerfil: undefined;
+  // Cartaz com QR Code pra imprimir e deixar na barbearia (ver QrCodeScreen).
+  QrCode: undefined;
   Suporte: undefined;
 };
 
@@ -73,6 +76,7 @@ export function MaisStackNavigator() {
       <Stack.Screen name="Logo" component={LogoScreen} options={{ headerShown: true, title: "Logo da barbearia" }} />
       <Stack.Screen name="MercadoPago" component={ConectarMercadoPagoScreen} options={{ headerShown: true, title: "Mercado Pago" }} />
       <Stack.Screen name="EditarPerfil" component={EditarPerfilScreen} options={{ headerShown: true, title: "Editar perfil" }} />
+      <Stack.Screen name="QrCode" component={QrCodeScreen} options={{ headerShown: true, title: "QR Code para imprimir" }} />
       <Stack.Screen name="Suporte" component={SuporteScreen} options={{ headerShown: true, title: "Suporte" }} />
     </Stack.Navigator>
   );

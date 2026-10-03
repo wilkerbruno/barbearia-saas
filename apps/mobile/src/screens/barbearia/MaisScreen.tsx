@@ -19,6 +19,7 @@ export function MaisScreen({ navigation }: Props) {
     { label: "Pacotes mensais", onPress: () => navigation.navigate("PacotesMensais") },
     { label: "Equipe", onPress: () => navigation.navigate("Equipe") },
     { label: "Localização", onPress: () => navigation.navigate("Localizacao") },
+    { label: "QR Code para imprimir", onPress: () => navigation.navigate("QrCode") },
     { label: "Logo da barbearia", onPress: () => navigation.navigate("Logo") },
     { label: "Mercado Pago", onPress: () => navigation.navigate("MercadoPago") },
     { label: "Assinatura do plano", onPress: () => navigation.navigate("Assinatura") },

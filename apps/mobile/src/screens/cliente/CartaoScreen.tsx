@@ -520,7 +520,13 @@ export function CartaoScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: spacing.xl, gap: spacing.md, paddingBottom: spacing.xxl },
+  // paddingBottom bem maior que o normal (não só spacing.xxl) de propósito:
+  // reserva espaço extra pro botão "Pagar agora" conseguir ser rolado pra
+  // cima do teclado mesmo em telas/Android onde o KeyboardAvoidingView
+  // (behavior "height") não encolhe a área visível direito — ver
+  // app.json > android.softwareKeyboardLayoutMode, que é a correção
+  // definitiva disso (mas só vale a partir do próximo build nativo).
+  content: { padding: spacing.xl, gap: spacing.md, paddingBottom: 220 },
   sectionTitle: { fontSize: 13, fontWeight: "700", color: colors.inkMuted, textTransform: "uppercase", marginTop: spacing.md },
   label: { fontSize: 12, color: colors.inkMuted },
   valor: { fontSize: 28, fontWeight: "800", color: colors.ink },
