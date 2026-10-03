@@ -9,7 +9,9 @@ const MP_AUTH_URL = "https://auth.mercadopago.com";
 
 export interface PreapprovalCriado {
   id: string;
-  initPoint: string;
+  // null quando criado via criarPreapprovalComCartao (sem checkout hospedado
+  // — não há link nenhum pro cliente abrir, a autorização já é direta).
+  initPoint: string | null;
   status: string;
 }
 
@@ -322,6 +324,54 @@ export class MercadoPagoService {
       accessTokenOverride,
     );
     return { id: String(corpo.id), initPoint: corpo.init_point, status: corpo.status };
+  }
+
+  // Variante SEM redirecionamento: autoriza a assinatura recorrente direto
+  // com um cartão já tokenizado no app (mesmo mecanismo de
+  // criarPagamentoCartao/CartaoScreen — o cliente nunca vê nem digita nada
+  // fora do app, e o número do cartão nunca passa por este servidor). O
+  // Mercado Pago aceita `card_token_id` direto no corpo de /preapproval pra
+  // isso (documentado como "assinatura sem plano associado") — sem isso, só
+  // dá pra criar a assinatura com o fluxo de checkout hospedado (ver
+  // criarPreapproval acima), que é o que gerava o redirecionamento.
+  // `status: "authorized"` pede pro Mercado Pago já tentar autorizar com o
+  // cartão na hora; mesmo assim pode voltar "pending" se precisar de mais
+  // alguma verificação — nesse caso só confirma de fato quando o webhook de
+  // "subscription_preapproval" chegar (ver WebhooksService), igual ao
+  // tratamento que já existe pro preapproval com checkout hospedado.
+  async criarPreapprovalComCartao(
+    params: {
+      reason: string;
+      externalReference: string;
+      payerEmail: string;
+      precoCentavos: number;
+      cardTokenId: string;
+      backUrl: string;
+    },
+    accessTokenOverride?: string,
+  ): Promise<PreapprovalCriado> {
+    const corpo: any = await this.chamar(
+      "/preapproval",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          reason: params.reason,
+          external_reference: params.externalReference,
+          payer_email: params.payerEmail,
+          back_url: params.backUrl,
+          card_token_id: params.cardTokenId,
+          status: "authorized",
+          auto_recurring: {
+            frequency: 1,
+            frequency_type: "months",
+            transaction_amount: Math.round(params.precoCentavos) / 100,
+            currency_id: "BRL",
+          },
+        }),
+      },
+      accessTokenOverride,
+    );
+    return { id: String(corpo.id), initPoint: corpo.init_point ?? null, status: corpo.status };
   }
 
   async buscarPreapproval(id: string, accessTokenOverride?: string): Promise<PreapprovalDetalhe> {

@@ -1,10 +1,12 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { StatusAgendamento, StatusAssinaturaPacote } from "@barbearia-saas/shared";
+import { MetodoPagamento, StatusAgendamento, StatusAssinaturaPacote, StatusPagamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
 import { MercadoPagoService } from "../pagamentos/mercadopago.service";
 import { CreatePacoteMensalDto } from "./dto/create-pacote-mensal.dto";
 import { UpdatePacoteMensalDto } from "./dto/update-pacote-mensal.dto";
+import { AssinarPacoteMensalDto } from "./dto/assinar-pacote-mensal.dto";
+import { traduzirMotivoRecusaCartao } from "../agendamentos/agendamentos.service";
 
 // Limites (segunda 00:00 até o próximo domingo 23:59:59) da semana em que
 // "dataReferencia" cai — usado tanto pra checar quanto pra mostrar a cota
@@ -87,11 +89,19 @@ export class PacotesMensaisService {
 
   // ---------- Assinatura do cliente ----------
 
-  // Inicia (ou reinicia, se cancelada antes) a assinatura recorrente do
-  // cliente — ele precisa abrir o `initPoint` devolvido e autorizar com o
-  // próprio cartão. Só vira ATIVA de verdade quando o Mercado Pago confirmar
-  // via webhook (ver WebhooksService.processarEventoMarketplace).
-  async assinar(clienteId: string, pacoteMensalId: string) {
+  // Inicia (ou reinicia, se cancelada antes) a assinatura do cliente — tudo
+  // resolvido dentro do app, sem redirecionar pro site do Mercado Pago:
+  //
+  // - Cartão + automatico=true: cria a cobrança recorrente direto com o token
+  //   do cartão (MercadoPagoService.criarPreapprovalComCartao) — vira ATIVA
+  //   assim que o Mercado Pago autorizar (pode já vir "authorized" na hora,
+  //   ou só depois via webhook "subscription_preapproval").
+  // - Pix, ou Cartão sem renovação automática: cobra só esse período agora
+  //   (igual um pagamento avulso de agendamento) e devolve o Pagamento
+  //   criado pro app mostrar o QR code / aguardar a confirmação; o cliente
+  //   volta a chamar esse mesmo endpoint pra pagar o próximo período quando
+  //   proximaCobrancaEm vencer.
+  async assinar(clienteId: string, pacoteMensalId: string, dto: AssinarPacoteMensalDto) {
     const pacote = await this.prisma.pacoteMensal.findUnique({ where: { id: pacoteMensalId } });
     if (!pacote || !pacote.ativo) throw new NotFoundException("Pacote mensal não encontrado.");
 
@@ -102,9 +112,18 @@ export class PacotesMensaisService {
       throw new BadRequestException("Você já tem uma assinatura ativa desse pacote.");
     }
 
-    const [cliente, tokenBarbearia] = await Promise.all([
+    const automatico = dto.metodoPagamento === MetodoPagamento.CARTAO && !!dto.automatico;
+
+    const [cliente, tokenBarbearia, ultimoPagamentoAprovado] = await Promise.all([
       this.prisma.usuario.findUnique({ where: { id: clienteId } }),
       this.mercadoPago.tokenDaBarbearia(pacote.barbeariaId),
+      // Só pra montar additional_info.payer da cobrança com cartão abaixo
+      // (ver MercadoPagoService.criarPagamentoCartao) — mesmo dado que
+      // AgendamentosService já calcula pra pagamento avulso de agendamento.
+      this.prisma.pagamento.findFirst({
+        where: { clienteId, status: StatusPagamento.APROVADO },
+        orderBy: { atualizadoEm: "desc" },
+      }),
     ]);
     if (!cliente) throw new NotFoundException("Cliente não encontrado.");
 
@@ -114,28 +133,177 @@ export class PacotesMensaisService {
     const assinatura = existente
       ? await this.prisma.assinaturaPacoteCliente.update({
           where: { id: existente.id },
-          data: { status: StatusAssinaturaPacote.PENDENTE },
+          data: {
+            status: StatusAssinaturaPacote.PENDENTE,
+            metodoPagamento: dto.metodoPagamento,
+            renovacaoAutomatica: automatico,
+          },
         })
       : await this.prisma.assinaturaPacoteCliente.create({
-          data: { pacoteMensalId, clienteId, barbeariaId: pacote.barbeariaId, status: StatusAssinaturaPacote.PENDENTE },
+          data: {
+            pacoteMensalId,
+            clienteId,
+            barbeariaId: pacote.barbeariaId,
+            status: StatusAssinaturaPacote.PENDENTE,
+            metodoPagamento: dto.metodoPagamento,
+            renovacaoAutomatica: automatico,
+          },
         });
 
-    const backUrl = this.config.get<string>("MERCADOPAGO_BACK_URL") ?? "https://www.mercadopago.com.br";
-    const preapproval = await this.mercadoPago.criarPreapproval(
-      {
-        reason: `Pacote mensal - ${pacote.nome}`,
-        // "assinaturaPacote:<id>": é assim que o webhook (que só recebe o id
-        // da preapproval no Mercado Pago) sabe qual AssinaturaPacoteCliente
-        // ativar — ver WebhooksService.
-        externalReference: `assinaturaPacote:${assinatura.id}`,
-        payerEmail: cliente.email,
-        precoCentavos: pacote.precoCentavos,
-        backUrl,
-      },
-      tokenBarbearia,
-    );
+    if (automatico) {
+      if (!dto.cartaoToken) throw new BadRequestException("Dados do cartão incompletos.");
 
-    return { initPoint: preapproval.initPoint };
+      const backUrl = this.config.get<string>("MERCADOPAGO_BACK_URL") ?? "https://www.mercadopago.com.br";
+      const preapproval = await this.mercadoPago.criarPreapprovalComCartao(
+        {
+          reason: `Pacote mensal - ${pacote.nome}`,
+          // "assinaturaPacote:<id>": mesmo formato usado pelo fluxo antigo de
+          // checkout hospedado — é assim que o webhook (que só recebe o id da
+          // preapproval no Mercado Pago) sabe qual AssinaturaPacoteCliente
+          // ativar (ver WebhooksService.tratarPreapprovalPacoteMensal).
+          externalReference: `assinaturaPacote:${assinatura.id}`,
+          payerEmail: cliente.email,
+          precoCentavos: pacote.precoCentavos,
+          cardTokenId: dto.cartaoToken,
+          backUrl,
+        },
+        tokenBarbearia,
+      );
+
+      const jaAutorizado = preapproval.status === "authorized";
+      const proximaCobrancaEm = jaAutorizado ? proximoMes(new Date()) : undefined;
+      await this.prisma.assinaturaPacoteCliente.update({
+        where: { id: assinatura.id },
+        data: {
+          gatewayAssinaturaId: preapproval.id,
+          status: jaAutorizado ? StatusAssinaturaPacote.ATIVA : StatusAssinaturaPacote.PENDENTE,
+          ...(proximaCobrancaEm ? { proximaCobrancaEm } : {}),
+        },
+      });
+
+      return { assinaturaId: assinatura.id, automatico: true, status: jaAutorizado ? "ATIVA" : "PENDENTE", pagamento: null };
+    }
+
+    // Pix, ou Cartão sem renovação automática: cobra só esse período, igual
+    // um pagamento avulso de agendamento (ver AgendamentosService.criarLote)
+    // — ligado pela assinaturaPacoteClienteId em vez de grupoId.
+    const pagamento = await this.prisma.pagamento.create({
+      data: {
+        clienteId,
+        barbeariaId: pacote.barbeariaId,
+        metodo: dto.metodoPagamento,
+        valorCentavos: pacote.precoCentavos,
+        assinaturaPacoteClienteId: assinatura.id,
+      },
+    });
+
+    try {
+      if (dto.metodoPagamento === MetodoPagamento.PIX) {
+        const pix = await this.mercadoPago.criarPagamentoPix(
+          {
+            valorCentavos: pacote.precoCentavos,
+            descricao: `Pacote mensal - ${pacote.nome}`,
+            // "_" (não ":") — mesmo motivo de AgendamentosService: a Orders
+            // API (usada pelo cartão) valida external_reference com um
+            // padrão mais restrito e rejeita ":".
+            externalReference: `pacotePagamento_${pagamento.id}`,
+            payerEmail: cliente.email,
+          },
+          tokenBarbearia,
+        );
+        const aprovadoNaHora = pix.status === "approved";
+        await this.prisma.pagamento.update({
+          where: { id: pagamento.id },
+          data: {
+            gatewayPagamentoId: pix.id,
+            pixQrCodeBase64: pix.qrCodeBase64,
+            pixCopiaECola: pix.qrCode,
+            status: aprovadoNaHora ? StatusPagamento.APROVADO : StatusPagamento.PENDENTE,
+          },
+        });
+        if (aprovadoNaHora) await this.ativarPeriodo(assinatura.id);
+      } else {
+        if (!dto.cartaoToken || !dto.cartaoBin || !dto.cartaoCpf) {
+          throw new BadRequestException("Dados do cartão incompletos.");
+        }
+        const { paymentMethodId } = await this.mercadoPago.identificarBandeiraCartao(dto.cartaoBin);
+        const cobranca = await this.mercadoPago.criarPagamentoCartao(
+          {
+            valorCentavos: pacote.precoCentavos,
+            descricao: `Pacote mensal - ${pacote.nome}`,
+            externalReference: `pacotePagamento_${pagamento.id}`,
+            token: dto.cartaoToken,
+            paymentMethodId,
+            payerEmail: cliente.email,
+            payerCpf: dto.cartaoCpf,
+            payerNome: cliente.nome,
+            payerTelefone: cliente.telefone,
+            deviceId: dto.cartaoDeviceId,
+            payerCadastradoEm: cliente.criadoEm,
+            payerPrimeiraCompra: !ultimoPagamentoAprovado,
+            payerUltimaCompraEm: ultimoPagamentoAprovado?.atualizadoEm ?? null,
+          },
+          tokenBarbearia,
+        );
+        const aprovadoNaHora = cobranca.status === "approved";
+        const recusado = cobranca.status === "rejected";
+        await this.prisma.pagamento.update({
+          where: { id: pagamento.id },
+          data: {
+            gatewayPagamentoId: cobranca.id,
+            status: aprovadoNaHora ? StatusPagamento.APROVADO : recusado ? StatusPagamento.RECUSADO : StatusPagamento.PENDENTE,
+            desafio3dsUrl: cobranca.desafio3dsUrl,
+          },
+        });
+        if (aprovadoNaHora) await this.ativarPeriodo(assinatura.id);
+        else if (recusado) throw new BadRequestException(traduzirMotivoRecusaCartao(cobranca.statusDetail));
+      }
+    } catch (e) {
+      this.logger.error(`Falha ao gerar cobrança do pacote mensal (assinatura ${assinatura.id}): ${e}`);
+      await this.prisma.pagamento.update({ where: { id: pagamento.id }, data: { status: StatusPagamento.RECUSADO } }).catch(() => {});
+      if (e instanceof BadRequestException) throw e;
+      throw new BadRequestException("Não foi possível gerar a cobrança agora. Tente novamente em instantes.");
+    }
+
+    const pagamentoFinal = await this.prisma.pagamento.findUniqueOrThrow({ where: { id: pagamento.id } });
+    return { assinaturaId: assinatura.id, automatico: false, status: null, pagamento: this.mapearPagamento(pagamentoFinal) };
+  }
+
+  // O app chama isso pra saber se o Pix/cartão avulso do período já foi pago
+  // — enquanto PENDENTE, também confere ao vivo com o Mercado Pago (mesmo
+  // padrão de AgendamentosService.buscarPagamento).
+  async buscarPagamento(pagamentoId: string, clienteId: string) {
+    const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
+    if (!pagamento || pagamento.clienteId !== clienteId) throw new NotFoundException("Pagamento não encontrado.");
+
+    if (pagamento.status === StatusPagamento.PENDENTE && pagamento.gatewayPagamentoId) {
+      try {
+        const token = await this.mercadoPago.tokenDaBarbearia(pagamento.barbeariaId);
+        const pagamentoMp = await this.mercadoPago.buscarPayment(pagamento.gatewayPagamentoId, token);
+        const novoStatus =
+          pagamentoMp.status === "approved"
+            ? StatusPagamento.APROVADO
+            : pagamentoMp.status === "pending" || pagamentoMp.status === "in_process" || pagamentoMp.status === "authorized"
+              ? StatusPagamento.PENDENTE
+              : StatusPagamento.RECUSADO;
+
+        const atualizado = await this.prisma.pagamento.update({
+          where: { id: pagamento.id },
+          data: {
+            status: novoStatus,
+            desafio3dsUrl: pagamentoMp.desafio3dsUrl ?? null,
+            taxaMercadoPagoCentavos: pagamentoMp.taxaCentavos,
+          },
+        });
+        if (novoStatus === StatusPagamento.APROVADO && pagamento.assinaturaPacoteClienteId) {
+          await this.ativarPeriodo(pagamento.assinaturaPacoteClienteId);
+        }
+        return this.mapearPagamento(atualizado);
+      } catch (e) {
+        this.logger.warn(`Falha ao sincronizar pagamento ${pagamentoId} (pacote mensal) ao vivo, devolvendo estado salvo: ${e}`);
+      }
+    }
+    return this.mapearPagamento(pagamento);
   }
 
   async minhasAssinaturas(clienteId: string) {
@@ -146,10 +314,23 @@ export class PacotesMensaisService {
     });
 
     return Promise.all(
-      assinaturas.map(async (a) => ({
-        ...a,
-        usosNaSemana: a.status === StatusAssinaturaPacote.ATIVA ? await this.usosNaSemana(a.id) : 0,
-      })),
+      assinaturas.map(async (a) => {
+        // Pagamento PENDENTE mais recente desse período (Pix/cartão avulso
+        // aguardando confirmação) — o app usa isso pra retomar a tela de
+        // pagamento em vez de reiniciar a assinatura do zero.
+        const pagamentoPendente = !a.renovacaoAutomatica
+          ? await this.prisma.pagamento.findFirst({
+              where: { assinaturaPacoteClienteId: a.id, status: StatusPagamento.PENDENTE },
+              orderBy: { criadoEm: "desc" },
+            })
+          : null;
+
+        return {
+          ...a,
+          usosNaSemana: a.status === StatusAssinaturaPacote.ATIVA ? await this.usosNaSemana(a.id) : 0,
+          pagamentoPendente: pagamentoPendente ? this.mapearPagamento(pagamentoPendente) : null,
+        };
+      }),
     );
   }
 
@@ -182,9 +363,58 @@ export class PacotesMensaisService {
     return this.prisma.assinaturaPacoteCliente.update({ where: { id }, data: { status: StatusAssinaturaPacote.CANCELADA } });
   }
 
+  // Marca o período atual como pago e empurra proximaCobrancaEm pra 1 mês à
+  // frente — chamado tanto na confirmação na hora (assinar) quanto pelo
+  // webhook (WebhooksService.tratarPagamentoPeriodoPacoteMensal) e pelo poll
+  // do app (buscarPagamento), todos podendo chegar primeiro dependendo da
+  // rede/latência do Mercado Pago.
+  async ativarPeriodo(assinaturaId: string) {
+    await this.prisma.assinaturaPacoteCliente.update({
+      where: { id: assinaturaId },
+      data: { status: StatusAssinaturaPacote.ATIVA, proximaCobrancaEm: proximoMes(new Date()) },
+    });
+  }
+
+  // Mesmo formato de AgendamentosService.mapearPagamento — devolvido tanto na
+  // resposta de assinar() quanto no polling (buscarPagamento) e na lista de
+  // assinaturas (minhasAssinaturas).
+  private mapearPagamento(pagamento: {
+    id: string;
+    clienteId: string;
+    barbeariaId: string;
+    metodo: string;
+    status: string;
+    valorCentavos: number;
+    valorEstornadoCentavos: number;
+    pixQrCodeBase64: string | null;
+    pixCopiaECola: string | null;
+    desafio3dsUrl: string | null;
+    criadoEm: Date;
+  }) {
+    return {
+      id: pagamento.id,
+      clienteId: pagamento.clienteId,
+      barbeariaId: pagamento.barbeariaId,
+      metodo: pagamento.metodo,
+      status: pagamento.status,
+      valorCentavos: pagamento.valorCentavos,
+      valorEstornadoCentavos: pagamento.valorEstornadoCentavos,
+      pixQrCodeBase64: pagamento.pixQrCodeBase64,
+      pixCopiaECola: pagamento.pixCopiaECola,
+      desafio3dsUrl: pagamento.desafio3dsUrl,
+      criadoEm: pagamento.criadoEm.toISOString(),
+    };
+  }
+
   private async garantirDaBarbearia(id: string, barbeariaId: string) {
     const pacote = await this.prisma.pacoteMensal.findUnique({ where: { id } });
     if (!pacote) throw new NotFoundException("Pacote mensal não encontrado.");
     if (pacote.barbeariaId !== barbeariaId) throw new ForbiddenException("Pacote mensal não pertence à sua barbearia.");
   }
+}
+
+function proximoMes(data: Date): Date {
+  const proxima = new Date(data);
+  proxima.setMonth(proxima.getMonth() + 1);
+  return proxima;
 }

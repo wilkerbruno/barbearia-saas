@@ -1,25 +1,30 @@
 import React, { useCallback, useState } from "react";
-import { ActivityIndicator, FlatList, Linking, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "@react-navigation/native";
-import { AssinarPacoteMensalResultado, AssinaturaPacoteCliente, centavosParaReais, StatusAssinaturaPacote } from "@barbearia-saas/shared";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { AssinaturaPacoteCliente, centavosParaReais, StatusAssinaturaPacote } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
 import { alertar } from "../../utils/alertaCompat";
 import { colors, spacing } from "../../theme/tokens";
+import { ProfileStackParamList } from "../../navigation/ProfileStack";
 
 const LABEL_STATUS: Record<StatusAssinaturaPacote, string> = {
-  PENDENTE: "Aguardando autorização",
+  PENDENTE: "Aguardando confirmação",
   ATIVA: "Ativa",
   INADIMPLENTE: "Pagamento pendente",
   CANCELADA: "Cancelada",
 };
 
+type Navigation = NativeStackNavigationProp<ProfileStackParamList, "MeusPacotes">;
+
 // Assinaturas de pacote mensal do cliente (em qualquer barbearia) — mostra o
-// status, quantas vezes já usou na semana e permite concluir a autorização
-// (se ficou pendente) ou cancelar. Ver PacotesMensaisService.
+// status, quantas vezes já usou na semana e permite concluir/retomar o
+// pagamento (se ficou pendente) ou cancelar. Ver PacotesMensaisService.
 export function MeusPacotesScreen() {
+  const navigation = useNavigation<Navigation>();
   const [assinaturas, setAssinaturas] = useState<AssinaturaPacoteCliente[] | null>(null);
   const [processandoId, setProcessandoId] = useState<string | null>(null);
 
@@ -30,16 +35,23 @@ export function MeusPacotesScreen() {
 
   useFocusEffect(useCallback(() => { carregar(); }, [carregar]));
 
-  async function autorizar(assinatura: AssinaturaPacoteCliente) {
-    setProcessandoId(assinatura.id);
-    try {
-      const { data } = await api.post<AssinarPacoteMensalResultado>(`/pacotes-mensais/${assinatura.pacoteMensalId}/assinar`);
-      await Linking.openURL(data.initPoint);
-    } catch (e: any) {
-      alertar("Não foi possível iniciar o pagamento", e?.response?.data?.message ?? "Tente de novo.");
-    } finally {
-      setProcessandoId(null);
+  // Abre a tela de assinatura dentro do próprio app — se já tinha um
+  // pagamento avulso (Pix/cartão) PENDENTE pra esse período, retoma direto
+  // nele (pagamentoPendente); senão deixa o cliente escolher o método de
+  // novo (ex: assinatura CANCELADA, ou renovação automática que nunca chegou
+  // a ser autorizada — ver AssinarPacoteScreen).
+  function autorizar(assinatura: AssinaturaPacoteCliente) {
+    if (!assinatura.pacoteMensal) {
+      alertar("Pacote não encontrado", "Esse pacote mensal pode ter sido removido pela barbearia.");
+      return;
     }
+    navigation.navigate("AssinarPacote", {
+      barbeariaId: assinatura.barbeariaId,
+      pacoteMensalId: assinatura.pacoteMensalId,
+      pacoteNome: assinatura.pacoteMensal.nome,
+      precoCentavos: assinatura.pacoteMensal.precoCentavos,
+      pagamentoPendente: assinatura.pagamentoPendente ?? undefined,
+    });
   }
 
   function cancelar(assinatura: AssinaturaPacoteCliente) {
@@ -100,22 +112,24 @@ export function MeusPacotesScreen() {
                   Uso essa semana: {item.usosNaSemana ?? 0} de {pacote.vezesPorSemana}
                 </Text>
               )}
-              {item.proximaCobrancaEm && (
-                <Text style={styles.meta}>Próxima cobrança: {new Date(item.proximaCobrancaEm).toLocaleDateString("pt-BR")}</Text>
+              {item.status === StatusAssinaturaPacote.ATIVA && (
+                <Text style={styles.meta}>
+                  {item.renovacaoAutomatica ? "Renovação automática no cartão" : "Renovação manual"}
+                  {item.proximaCobrancaEm && ` · próxima cobrança: ${new Date(item.proximaCobrancaEm).toLocaleDateString("pt-BR")}`}
+                </Text>
               )}
 
               {(item.status === StatusAssinaturaPacote.PENDENTE || item.status === StatusAssinaturaPacote.INADIMPLENTE) && (
                 <Button
-                  label={item.status === StatusAssinaturaPacote.PENDENTE ? "Concluir autorização" : "Regularizar pagamento"}
+                  label={item.pagamentoPendente ? "Continuar pagamento" : item.status === StatusAssinaturaPacote.PENDENTE ? "Concluir assinatura" : "Regularizar pagamento"}
                   onPress={() => autorizar(item)}
-                  loading={processando}
                 />
               )}
               {item.status === StatusAssinaturaPacote.CANCELADA && (
-                <Button label="Assinar de novo" variant="secondary" onPress={() => autorizar(item)} loading={processando} />
+                <Button label="Assinar de novo" variant="secondary" onPress={() => autorizar(item)} />
               )}
               {item.status === StatusAssinaturaPacote.ATIVA && (
-                <Text style={styles.cancelarLink} onPress={() => cancelar(item)}>
+                <Text style={[styles.cancelarLink, processando && { opacity: 0.5 }]} onPress={() => !processando && cancelar(item)}>
                   Cancelar assinatura
                 </Text>
               )}

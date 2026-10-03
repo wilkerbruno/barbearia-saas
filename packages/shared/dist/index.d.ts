@@ -276,13 +276,27 @@ export interface AssinaturaPacoteCliente {
     clienteId: string;
     barbeariaId: string;
     status: StatusAssinaturaPacote;
+    metodoPagamento: MetodoPagamento;
+    renovacaoAutomatica: boolean;
     inicioEm: string;
     proximaCobrancaEm?: string | null;
     pacoteMensal?: PacoteMensal;
     usosNaSemana?: number;
+    pagamentoPendente?: Pagamento | null;
+}
+export interface AssinarPacoteMensalInput {
+    metodoPagamento: MetodoPagamento;
+    automatico?: boolean;
+    cartaoToken?: string;
+    cartaoBin?: string;
+    cartaoCpf?: string;
+    cartaoDeviceId?: string;
 }
 export interface AssinarPacoteMensalResultado {
-    initPoint: string;
+    assinaturaId: string;
+    automatico: boolean;
+    status: "ATIVA" | "PENDENTE" | null;
+    pagamento: Pagamento | null;
 }
 export interface ResumoFinanceiro {
     faturamentoCentavos: number;

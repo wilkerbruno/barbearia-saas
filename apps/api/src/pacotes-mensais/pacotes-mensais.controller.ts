@@ -3,6 +3,7 @@ import { Papel } from "@barbearia-saas/shared";
 import { PacotesMensaisService } from "./pacotes-mensais.service";
 import { CreatePacoteMensalDto } from "./dto/create-pacote-mensal.dto";
 import { UpdatePacoteMensalDto } from "./dto/update-pacote-mensal.dto";
+import { AssinarPacoteMensalDto } from "./dto/assinar-pacote-mensal.dto";
 import { Roles } from "../common/decorators/roles.decorator";
 import { Public } from "../common/decorators/public.decorator";
 import { CurrentUser } from "../common/decorators/current-user.decorator";
@@ -42,10 +43,21 @@ export class PacotesMensaisController {
 
   // ---------- Assinatura (o cliente) ----------
 
+  // Tudo dentro do app, sem redirecionar pro site do Mercado Pago — ver
+  // PacotesMensaisService.assinar pros detalhes de cada método de pagamento.
   @Roles(Papel.CLIENTE)
   @Post("pacotes-mensais/:id/assinar")
-  assinar(@Param("id") id: string, @CurrentUser() user: AuthUser) {
-    return this.pacotesMensaisService.assinar(user.id, id);
+  assinar(@Param("id") id: string, @Body() dto: AssinarPacoteMensalDto, @CurrentUser() user: AuthUser) {
+    return this.pacotesMensaisService.assinar(user.id, id, dto);
+  }
+
+  // O app faz polling nisso enquanto aguarda a confirmação do Pix/cartão
+  // avulso de um período (ver AssinarPacoteScreen) — mesmo padrão de
+  // GET /agendamentos/pagamentos/:id.
+  @Roles(Papel.CLIENTE)
+  @Get("pacotes-mensais/pagamentos/:id")
+  buscarPagamento(@Param("id") id: string, @CurrentUser() user: AuthUser) {
+    return this.pacotesMensaisService.buscarPagamento(id, user.id);
   }
 
   @Roles(Papel.CLIENTE)

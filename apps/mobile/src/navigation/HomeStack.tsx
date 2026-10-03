@@ -7,6 +7,7 @@ import { BarbeariaDetailScreen } from "../screens/cliente/BarbeariaDetailScreen"
 import { BookingScreen } from "../screens/cliente/BookingScreen";
 import { CartaoScreen } from "../screens/cliente/CartaoScreen";
 import { PagamentoScreen } from "../screens/cliente/PagamentoScreen";
+import { AssinarPacoteScreen, AssinarPacoteParams } from "../screens/cliente/AssinarPacoteScreen";
 import { darkStackScreenOptions } from "./stackHeaderOptions";
 
 // Um item pré-selecionado na tela da barbearia (serviço OU pacote) que chega
@@ -29,6 +30,10 @@ export type HomeStackParamList = {
   // Cobrança (Pix/Cartão) gerada ao confirmar o agendamento — ver
   // AgendamentosService.criarLote/AgendamentoLoteCriado.
   Pagamento: { pagamento: Pagamento; aviso: string };
+  // Assinar um pacote mensal — entra aqui a partir de BarbeariaDetailScreen
+  // (também registrada em ProfileStack, a partir de MeusPacotesScreen, ver
+  // comentário em AssinarPacoteScreen).
+  AssinarPacote: AssinarPacoteParams;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -55,6 +60,11 @@ export function HomeStackNavigator() {
         name="Pagamento"
         component={PagamentoScreen}
         options={{ headerShown: true, title: "Pagamento", gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="AssinarPacote"
+        component={AssinarPacoteScreen as any}
+        options={{ headerShown: true, title: "Assinar pacote", gestureEnabled: false }}
       />
     </Stack.Navigator>
   );

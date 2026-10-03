@@ -1,8 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { StatusAgendamento, StatusAssinaturaPacote, StatusPagamento } from "@barbearia-saas/shared";
 import { PrismaService } from "../prisma/prisma.service";
-import { MercadoPagoService } from "../pagamentos/mercadopago.service";
+import { MercadoPagoService, PaymentDetalhe } from "../pagamentos/mercadopago.service";
 import { AssinaturasService } from "../assinaturas/assinaturas.service";
+import { PacotesMensaisService } from "../pacotes-mensais/pacotes-mensais.service";
 
 // Mapeia o status devolvido pelo Mercado Pago pro nosso StatusPagamento.
 function mapearStatusPagamento(status: string | null | undefined): StatusPagamento {
@@ -18,7 +19,8 @@ function mapearStatusPagamento(status: string | null | undefined): StatusPagamen
 //
 // - Evento numa conta CONECTADA (barbearia, via OAuth — reconhecida pelo
 //   `user_id` do payload batendo com Barbearia.mercadoPagoUserId): pagamento
-//   avulso de agendamento, ou (futuramente) assinatura de pacote mensal.
+//   avulso de agendamento, pagamento avulso de um período de pacote mensal,
+//   ou assinatura recorrente de pacote mensal.
 // - Qualquer outro evento: assinatura SaaS da barbearia com a Divisions Tech
 //   (fluxo antigo, inalterado — ver AssinaturasService.processarEventoPagamento).
 @Injectable()
@@ -29,6 +31,7 @@ export class WebhooksService {
     private prisma: PrismaService,
     private mercadoPago: MercadoPagoService,
     private assinaturasService: AssinaturasService,
+    private pacotesMensaisService: PacotesMensaisService,
   ) {}
 
   async processarEventoPagamento(payload: any, query: Record<string, any>, headers: Record<string, any>) {
@@ -78,10 +81,11 @@ export class WebhooksService {
     // MercadoPagoService.criarPagamentoCartao/buscarPayment, que já sabe
     // reconhecer um id de Order pelo prefixo "ORD" e traduzir sozinho);
     // "payment" continua sendo o evento do Pix (API clássica). Mesma rota
-    // pros dois porque tratarPagamentoAgendamento chama buscarPayment, que
-    // decide sozinho qual API consultar.
+    // pros dois — tratarPagamentoMarketplace busca o Payment/Order uma única
+    // vez e decide, pelo external_reference, se é de um agendamento ou de um
+    // período avulso de pacote mensal.
     if (tipo === "payment" || tipo === "order") {
-      await this.tratarPagamentoAgendamento(dataId, barbeariaId);
+      await this.tratarPagamentoMarketplace(dataId, barbeariaId);
       return;
     }
     if (tipo === "subscription_preapproval" || tipo === "preapproval") {
@@ -139,17 +143,31 @@ export class WebhooksService {
       });
   }
 
-  // "agendamento_<pagamentoId>" — ver como AgendamentosService monta o
-  // external_reference ao criar a cobrança Pix/Cartão. Separador é "_", não
-  // ":" (a Orders API, usada pelo cartão, rejeita ":" nesse campo — ver
-  // AgendamentosService); o pagamentoId é um uuid (só hexadecimal e "-"),
-  // então dividir por "_" continua seguro e sempre dá exatamente 2 partes.
-  private async tratarPagamentoAgendamento(paymentId: string, barbeariaId: string) {
+  // Busca o Payment/Order UMA vez e decide, pelo prefixo do external_reference,
+  // se é a cobrança de um agendamento ("agendamento_<id>") ou de um período
+  // avulso de pacote mensal ("pacotePagamento_<id>") — "_", não ":", pelo
+  // mesmo motivo de sempre: a Orders API (usada pelo cartão) rejeita ":"
+  // nesse campo, e os dois fluxos foram padronizados nesse mesmo formato.
+  private async tratarPagamentoMarketplace(paymentId: string, barbeariaId: string) {
     const token = await this.mercadoPago.tokenDaBarbearia(barbeariaId);
     const pagamentoMp = await this.mercadoPago.buscarPayment(paymentId, token);
-    const [prefixo, pagamentoId] = (pagamentoMp.externalReference ?? "").split("_");
-    if (prefixo !== "agendamento" || !pagamentoId) return;
+    const [prefixo, idReferenciado] = (pagamentoMp.externalReference ?? "").split("_");
+    if (prefixo === "agendamento" && idReferenciado) {
+      await this.tratarPagamentoAgendamento(paymentId, pagamentoMp, idReferenciado);
+      return;
+    }
+    if (prefixo === "pacotePagamento" && idReferenciado) {
+      await this.tratarPagamentoPeriodoPacoteMensal(paymentId, pagamentoMp, idReferenciado);
+      return;
+    }
+  }
 
+  // "agendamento_<pagamentoId>" — ver como AgendamentosService monta o
+  // external_reference ao criar a cobrança Pix/Cartão. O pagamentoId é um
+  // uuid (só hexadecimal e "-"), então dividir por "_" continua seguro e
+  // sempre dá exatamente 2 partes. `pagamentoMp` já vem buscado por
+  // tratarPagamentoMarketplace (um único buscarPayment pro webhook inteiro).
+  private async tratarPagamentoAgendamento(paymentId: string, pagamentoMp: PaymentDetalhe, pagamentoId: string) {
     const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
     if (!pagamento) {
       this.logger.warn(`Pagamento ${pagamentoId} (do external_reference) não encontrado — webhook ignorado.`);
@@ -188,6 +206,38 @@ export class WebhooksService {
         where: { grupoId: pagamento.grupoId, status: StatusAgendamento.PENDENTE },
         data: { status: StatusAgendamento.CANCELADO },
       });
+    }
+  }
+
+  // "pacotePagamento_<pagamentoId>" — ver PacotesMensaisService.assinar
+  // (Pix, ou Cartão sem renovação automática: cobra um período avulso, igual
+  // um agendamento, mas ligado por assinaturaPacoteClienteId em vez de
+  // grupoId). Aprovado aqui marca o período como pago e empurra
+  // proximaCobrancaEm pra 1 mês à frente (ver
+  // PacotesMensaisService.ativarPeriodo) — pode chegar antes ou depois do
+  // poll que o app já faz em GET pacotes-mensais/pagamentos/:id, então os
+  // dois caminhos levam ao mesmo lugar sem duplicar efeito (ativarPeriodo só
+  // seta status/proximaCobrancaEm, idempotente de repetir).
+  private async tratarPagamentoPeriodoPacoteMensal(paymentId: string, pagamentoMp: PaymentDetalhe, pagamentoId: string) {
+    const pagamento = await this.prisma.pagamento.findUnique({ where: { id: pagamentoId } });
+    if (!pagamento) {
+      this.logger.warn(`Pagamento ${pagamentoId} (do external_reference, pacote mensal) não encontrado — webhook ignorado.`);
+      return;
+    }
+    if (pagamento.status === StatusPagamento.APROVADO && pagamento.gatewayPagamentoId === paymentId) return;
+
+    const novoStatus = mapearStatusPagamento(pagamentoMp.status);
+    await this.prisma.pagamento.update({
+      where: { id: pagamentoId },
+      data: {
+        status: novoStatus,
+        gatewayPagamentoId: paymentId,
+        taxaMercadoPagoCentavos: pagamentoMp.taxaCentavos,
+      },
+    });
+
+    if (novoStatus === StatusPagamento.APROVADO && pagamento.assinaturaPacoteClienteId) {
+      await this.pacotesMensaisService.ativarPeriodo(pagamento.assinaturaPacoteClienteId);
     }
   }
 }

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, Linking, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
-import { AssinarPacoteMensalResultado, Avaliacao, BarbeariaPublica, Pacote, PacoteMensal, Servico } from "@barbearia-saas/shared";
+import { Avaliacao, BarbeariaPublica, Pacote, PacoteMensal, Servico } from "@barbearia-saas/shared";
 import { api } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Card } from "../../components/Card";
@@ -35,7 +35,6 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
   const [comentario, setComentario] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [enviandoAvaliacao, setEnviandoAvaliacao] = useState(false);
-  const [assinandoId, setAssinandoId] = useState<string | null>(null);
 
   // Serviços/pacotes marcados aqui — ao tocar em "Agendar", eles vão prontos
   // pra tela seguinte, que pula direto pra escolha de dia/horário.
@@ -102,20 +101,16 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
     navigation.navigate("Agendar", { barbeariaId, nome, itensPreSelecionados });
   }
 
-  async function assinarPacoteMensal(pacote: PacoteMensal) {
-    setAssinandoId(pacote.id);
-    try {
-      const { data } = await api.post<AssinarPacoteMensalResultado>(`/pacotes-mensais/${pacote.id}/assinar`);
-      await Linking.openURL(data.initPoint);
-      alertar(
-        "Autorize no Mercado Pago",
-        "Depois de autorizar a cobrança recorrente, acompanhe o status em Perfil > Meus pacotes mensais.",
-      );
-    } catch (e: any) {
-      alertar("Não foi possível iniciar a assinatura", e?.response?.data?.message ?? "Tente de novo.");
-    } finally {
-      setAssinandoId(null);
-    }
+  // Abre a tela de assinatura dentro do próprio app (Pix ou Cartão, com
+  // opção de renovação automática no cartão — ver AssinarPacoteScreen) em
+  // vez de redirecionar pro site do Mercado Pago como antes.
+  function assinarPacoteMensal(pacote: PacoteMensal) {
+    navigation.navigate("AssinarPacote", {
+      barbeariaId,
+      pacoteMensalId: pacote.id,
+      pacoteNome: pacote.nome,
+      precoCentavos: pacote.precoCentavos,
+    });
   }
 
   async function enviarAvaliacao() {
@@ -236,12 +231,7 @@ export function BarbeariaDetailScreen({ route, navigation }: Props) {
                       Até {pacote.vezesPorSemana}x por semana · {pacote.servicos.map((ps) => ps.servico.nome).join(", ")}
                     </Text>
                     {pacote.descricao && <Text style={styles.itemMeta}>{pacote.descricao}</Text>}
-                    <Button
-                      label="Assinar"
-                      variant="secondary"
-                      onPress={() => assinarPacoteMensal(pacote)}
-                      loading={assinandoId === pacote.id}
-                    />
+                    <Button label="Assinar" variant="secondary" onPress={() => assinarPacoteMensal(pacote)} />
                   </Card>
                 ))}
               </View>

@@ -448,20 +448,55 @@ export interface AssinaturaPacoteCliente {
   clienteId: string;
   barbeariaId: string;
   status: StatusAssinaturaPacote;
+  // Pix ou Cartão (ver PacotesMensaisService.assinar).
+  metodoPagamento: MetodoPagamento;
+  // true só quando metodoPagamento=CARTAO e o cliente autorizou a cobrança
+  // recorrente direto no app (sem checkout hospedado) — ver
+  // MercadoPagoService.criarPreapprovalComCartao. Quando false, cada período
+  // é cobrado avulso e o cliente precisa voltar no app pra pagar de novo
+  // (ver pagamentoPendente abaixo) quando proximaCobrancaEm vencer.
+  renovacaoAutomatica: boolean;
   inicioEm: string;
   proximaCobrancaEm?: string | null;
   pacoteMensal?: PacoteMensal;
   // Quantas vezes já usou o pacote na semana corrente (ver
   // PacotesMensaisService) — usado pra mostrar "2 de 3 usos essa semana".
   usosNaSemana?: number;
+  // Pagamento PENDENTE mais recente de um período avulso (Pix, ou Cartão sem
+  // renovação automática) — presente quando o cliente iniciou mas não
+  // concluiu o pagamento desse período (ver PacotesMensaisService.minhasAssinaturas).
+  pagamentoPendente?: Pagamento | null;
 }
 
-// Retorno de POST /pacotes-mensais/:id/assinar — o cliente precisa abrir
-// `initPoint` e autorizar a cobrança recorrente com o cartão dele; a
-// assinatura só vira ATIVA de verdade quando o webhook confirmar (ver
-// WebhooksService/PacotesMensaisService).
+// Corpo de POST /pacotes-mensais/:id/assinar — ver PacotesMensaisService.assinar
+// e AssinarPacoteMensalResultado (a resposta) pro resto do fluxo. Mesmo
+// formato de dados de cartão que CriarAgendamentoLoteInput.
+export interface AssinarPacoteMensalInput {
+  metodoPagamento: MetodoPagamento; // PIX ou CARTAO
+  // Só considerado quando metodoPagamento=CARTAO: true assina com cobrança
+  // recorrente automática (sem o cliente precisar voltar no app todo mês).
+  automatico?: boolean;
+  cartaoToken?: string;
+  cartaoBin?: string;
+  cartaoCpf?: string;
+  cartaoDeviceId?: string;
+}
+
+// Retorno de POST /pacotes-mensais/:id/assinar — tudo resolvido dentro do
+// app, sem redirecionar pro site do Mercado Pago (ver
+// PacotesMensaisService.assinar):
+// - automatico=true (Cartão com renovação automática): `status` já diz se
+//   autorizou na hora ("ATIVA") ou se falta confirmação do Mercado Pago
+//   ("PENDENTE", resolvido pelo webhook); `pagamento` sempre null.
+// - automatico=false (Pix, ou Cartão sem renovação automática): `pagamento`
+//   traz o Pagamento desse período (QR code do Pix, ou já aprovado/recusado
+//   no caso do cartão) pro app mostrar/aguardar confirmação (ver GET
+//   pacotes-mensais/pagamentos/:id pro polling); `status` sempre null.
 export interface AssinarPacoteMensalResultado {
-  initPoint: string;
+  assinaturaId: string;
+  automatico: boolean;
+  status: "ATIVA" | "PENDENTE" | null;
+  pagamento: Pagamento | null;
 }
 
 // ============================= FINANCEIRO =============================

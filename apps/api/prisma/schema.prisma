@@ -526,6 +526,13 @@ model Pagamento {
   // 0 enquanto ainda não aprovou (só vem preenchido num pagamento já
   // processado). Ver MercadoPagoService.buscarPayment/buscarOrderComoPayment.
   taxaMercadoPagoCentavos Int @default(0)
+  // Preenchido em vez de grupoId quando essa cobrança é de UM período (1 mês)
+  // de uma assinatura de pacote mensal do cliente, cobrado avulso (Pix, ou
+  // Cartão sem renovação automática — ver PacotesMensaisService.assinar).
+  // Nunca preenchido junto com grupoId (são cobranças de origens diferentes:
+  // agendamento vs assinatura de pacote).
+  assinaturaPacoteClienteId String?
+  assinaturaPacoteCliente   AssinaturaPacoteCliente? @relation(fields: [assinaturaPacoteClienteId], references: [id])
   criadoEm     DateTime @default(now())
   atualizadoEm DateTime @updatedAt
 
@@ -533,6 +540,7 @@ model Pagamento {
   @@index([barbeariaId])
   @@index([gatewayPagamentoId])
   @@index([grupoId])
+  @@index([assinaturaPacoteClienteId])
 }
 
 // ============================= AVALIAÇÕES (ESTRELAS) =============================
@@ -610,12 +618,23 @@ model AssinaturaPacoteCliente {
   barbeariaId         String
   barbearia           Barbearia @relation(fields: [barbeariaId], references: [id])
   status              StatusAssinaturaPacote @default(PENDENTE)
+  // Pix ou Cartão (nunca Dinheiro aqui) — ver PacotesMensaisService.assinar.
+  metodoPagamento     MetodoPagamento @default(CARTAO)
+  // true só quando metodoPagamento=CARTAO e o cliente autorizou a cobrança
+  // recorrente direto no app (sem sair pro site do Mercado Pago — ver
+  // MercadoPagoService.criarPreapprovalComCartao): o Mercado Pago cobra o
+  // cartão sozinho todo mês a partir daí. Quando false (Pix, ou Cartão sem
+  // marcar essa opção), cada período é cobrado avulso — igual um
+  // agendamento normal — e o cliente precisa voltar no app pra pagar de novo
+  // (ou ativar o automático) quando proximaCobrancaEm vencer.
+  renovacaoAutomatica Boolean  @default(false)
   inicioEm            DateTime @default(now())
   proximaCobrancaEm   DateTime?
-  gatewayAssinaturaId String? // id da preapproval no Mercado Pago
+  gatewayAssinaturaId String? // id da preapproval no Mercado Pago (só quando renovacaoAutomatica)
   criadoEm            DateTime @default(now())
 
   agendamentos Agendamento[]
+  pagamentos   Pagamento[]
 
   @@unique([pacoteMensalId, clienteId])
   @@index([barbeariaId])
